@@ -214,6 +214,8 @@ textarea {
   border-radius: 16px;
   padding: 1rem;
   box-shadow: 0 10px 24px rgba(40, 69, 123, 0.08);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .calendar-card h3 {
@@ -222,8 +224,20 @@ textarea {
   white-space: nowrap;
 }
 
+.calendar-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(40, 69, 123, 0.12);
+}
+
 .calendar-meta {
   white-space: nowrap;
+}
+
+.calendar-meta.employee,
+.calendar-meta.employee-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-pill {
@@ -234,17 +248,34 @@ textarea {
   font-size: 0.85rem;
   background: rgba(79, 131, 255, 0.12);
   color: #3552b7;
+  border: 1px solid rgba(0,0,0,0.06);
   font-weight: 600;
 }
 
 .status-pill[data-status='BOOKED'] {
-  background: rgba(59, 177, 116, 0.18);
-  color: #2b7a4e;
+  background: #e9f7ef;
+  color: #1e7e34;
+  border-color: rgba(30, 126, 52, 0.25);
 }
 
 .status-pill[data-status='CANCELLED'] {
-  background: rgba(250, 114, 114, 0.16);
-  color: #b23838;
+  background: #fdecea;
+  color: #b3261e;
+  border-color: rgba(179, 38, 30, 0.25);
+}
+
+/* Optional: neutral/pending */
+.status-pill[data-status='PENDING'],
+.status-pill[data-status='REQUESTED'] {
+  background: #fff7e6;
+  color: #8a6d1a;
+  border-color: rgba(138, 109, 26, 0.25);
+}
+
+/* Ensure long employee line wraps inside card */
+.calendar-meta.wrap {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .inline-form {

@@ -92,6 +92,8 @@ const SAMPLE_DATA = {
       status: 'BOOKED',
       purpose_name: 'Team Sync-Up',
       seat_code: 'ENG-01',
+      employee_code: 'EMP001',
+      employee_name: 'Arthit Prasert',
     },
     {
       booking_id: 'b2',
@@ -101,6 +103,8 @@ const SAMPLE_DATA = {
       status: 'BOOKED',
       purpose_name: 'Client Meeting',
       seat_code: null,
+      employee_code: 'EMP002',
+      employee_name: 'Warin Somsri',
     },
   ],
   booking_status_daily_summary: [
@@ -210,6 +214,9 @@ function App() {
   const [employeeYearly, setEmployeeYearly] = useState({ loading: true, rows: [] })
   const [historyReport, setHistoryReport] = useState({ loading: true, rows: [] })
   const [holidayReport, setHolidayReport] = useState({ loading: true, rows: [] })
+
+  // Booking editor modal state
+  const [editBookingState, setEditBookingState] = useState({ open: false, loading: false, id: null, form: null })
 
   const supabase = useMemo(() => {
     if (!ENV_SUPABASE_URL || !ENV_SUPABASE_ANON_KEY) return null
@@ -363,6 +370,76 @@ function App() {
       setHistoryReport({ loading: false, rows: [] })
     }
   }, [fetchView])
+
+  const openBookingEditor = useCallback(
+    async (bookingId) => {
+      setEditBookingState({ open: true, loading: true, id: bookingId, form: null })
+      try {
+        if (!supabase) {
+          // Fallback to data in calendar view for display only
+          const row = calendarState.rows.find((r) => r.booking_id === bookingId)
+          setEditBookingState({
+            open: true,
+            loading: false,
+            id: bookingId,
+            form: row
+              ? {
+                  booking_date: row.booking_date,
+                  department_id: departments.find((d) => d.name === row.department_name)?.id ?? '',
+                  purpose_id: purposes.find((p) => p.name === row.purpose_name)?.id ?? '',
+                  seat_id: seats.find((s) => s.seat_code === row.seat_code)?.id ?? '',
+                  note: '',
+                  status: row.status ?? 'BOOKED',
+                  user_id: null,
+                }
+              : null,
+          })
+          return
+        }
+        const { data, error } = await supabase.from('bookings').select('*').eq('id', bookingId).single()
+        if (error) throw error
+        setEditBookingState({ open: true, loading: false, id: bookingId, form: data })
+      } catch (error) {
+        console.error('Failed to load booking', error)
+        setEditBookingState({ open: true, loading: false, id: bookingId, form: null })
+        alert(error.message || 'ไม่สามารถโหลดข้อมูลการจองได้')
+      }
+    },
+    [supabase, calendarState.rows, departments, purposes, seats]
+  )
+
+  const closeBookingEditor = useCallback(() => setEditBookingState({ open: false, loading: false, id: null, form: null }), [])
+
+  const handleBookingEditChange = useCallback((patch) => {
+    setEditBookingState((prev) => ({ ...prev, form: { ...(prev.form ?? {}), ...patch } }))
+  }, [])
+
+  const saveBookingEdit = useCallback(async () => {
+    if (!supabaseConfigured || !supabase) {
+      alert(SUPABASE_ENV_HINT)
+      return
+    }
+    const f = editBookingState.form ?? {}
+    const payload = {
+      booking_date: f.booking_date,
+      department_id: f.department_id || null,
+      seat_id: f.seat_id || null,
+      purpose_id: f.purpose_id || null,
+      note: f.note || null,
+      status: f.status || 'BOOKED',
+      user_id: f.user_id || null,
+    }
+    try {
+      const { error } = await supabase.from('bookings').update(payload).eq('id', editBookingState.id)
+      if (error) throw error
+      alert('อัปเดตการจองเรียบร้อยแล้ว')
+      closeBookingEditor()
+      await Promise.all([reloadCalendar(), reloadHistory(), reloadDailyStatus(), reloadCapacity()])
+    } catch (error) {
+      console.error(error)
+      alert(error.message || 'ไม่สามารถอัปเดตการจองได้')
+    }
+  }, [supabaseConfigured, supabase, editBookingState.id, editBookingState.form, closeBookingEditor, reloadCalendar, reloadHistory, reloadDailyStatus, reloadCapacity])
 
   const reloadDepartments = useCallback(async () => {
     try {
@@ -635,6 +712,7 @@ function App() {
                   onReset={handleBookingReset}
                   calendarState={calendarState}
                   bookingDisabled={bookingDisabled}
+                  onOpenBooking={openBookingEditor}
                 />
               }
             />
@@ -699,6 +777,20 @@ function App() {
           </Routes>
         </main>
       </div>
+      {editBookingState.open && (
+        <BookingEditModal
+          loading={editBookingState.loading}
+          form={editBookingState.form}
+          onChange={handleBookingEditChange}
+          onClose={closeBookingEditor}
+          onSave={saveBookingEdit}
+          departments={departments}
+          purposes={purposes}
+          seats={seats}
+          strategies={strategies}
+          employees={employees}
+        />
+      )}
     </BrowserRouter>
   )
 }
@@ -729,6 +821,7 @@ function BookingPage({
   onReset,
   calendarState,
   bookingDisabled,
+  onOpenBooking,
 }) {
   return (
     <section className="tab-panel active">
@@ -828,11 +921,22 @@ function BookingPage({
         <DataRegion state={calendarState}>
           <div className="calendar-grid">
             {calendarState.rows.map((item) => (
-              <article key={item.booking_id} className="calendar-card">
+              <article
+                key={item.booking_id}
+                className="calendar-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenBooking?.(item.booking_id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') onOpenBooking?.(item.booking_id)
+                }}
+              >
                 <h3>{formatDate(item.booking_date)}</h3>
                 <p className="calendar-meta">
                   {item.office_name ?? '-'} • {item.department_name ?? '-'}
                 </p>
+                <p className="calendar-meta">พนักงาน: {formatEmployeeCode(item) || '-'}</p>
+                <p className="calendar-meta employee-name">{formatEmployeeName(item) || '-'}</p>
                 <p className="calendar-meta">เหตุผล: {item.purpose_name ?? '-'}</p>
                 <StatusPill status={item.status} />
               </article>
@@ -1749,3 +1853,153 @@ function formatMonth(value) {
 }
 
 export default App
+
+// Fallback formatter for employee name on booking rows coming from views
+function formatEmployeeFromRow(row) {
+  if (!row) return '-'
+  const code = row.employee_code ?? ''
+  const name = (
+    row.employee_name ?? [row.first_name, row.last_name].filter(Boolean).join('\u00A0').trim()
+  ) || ''
+  const both = [code, name].filter(Boolean).join(' - ')
+  return both || code || name || '-'
+}
+
+function formatEmployeeCode(row) {
+  return row?.employee_code ?? ''
+}
+
+function formatEmployeeName(row) {
+  const name = (
+    row?.employee_name ?? [row?.first_name, row?.last_name].filter(Boolean).join('\u00A0').trim()
+  ) || ''
+  return name
+}
+
+function BookingEditModal({ loading, form, onChange, onClose, onSave, departments, purposes, seats, strategies, employees }) {
+  const dept = useMemo(() => departments.find((d) => d.id === form?.department_id) ?? null, [departments, form])
+  const seatRequired = dept?.booking_strategy === 'ASSIGNED'
+  const filteredSeats = useMemo(() => {
+    if (!form?.department_id) return []
+    return seats.filter((s) => s.department_id === form.department_id)
+  }, [seats, form])
+  const statusOptions = ['BOOKED', 'CANCELLED']
+  const eligibleEmps = useMemo(() => {
+    if (form?.department_id) return employees.filter((e) => e.department_id === form.department_id)
+    return employees
+  }, [employees, form])
+
+  const [employeeSearch, setEmployeeSearch] = useState('')
+  useEffect(() => {
+    if (!form) return
+    const emp = employees.find((e) => e.user_id === form.user_id)
+    if (emp) setEmployeeSearch(formatEmployeeOption(emp))
+  }, [employees, form])
+
+  if (!form) return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>ดูรายละเอียดการจอง</h2>
+        <p className="hint">ไม่พบข้อมูลการจอง</p>
+        <div className="modal-actions">
+          <button className="btn secondary" onClick={onClose}>ปิด</button>
+        </div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>รายละเอียดการจอง</h2>
+        {loading ? (
+          <div className="loading-state"><div className="spinner" aria-hidden="true" /> กำลังโหลด...</div>
+        ) : (
+          <form className="modal-form" onSubmit={(e) => { e.preventDefault(); onSave(); }}>
+            <label>
+              พนักงาน
+              <input
+                type="text"
+                list="modal-employee-options"
+                placeholder="ระบุรหัส ชื่อ หรือ นามสกุล"
+                value={employeeSearch}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setEmployeeSearch(value)
+                  const lower = value.toLowerCase()
+                  const exact = eligibleEmps.find((emp) => formatEmployeeOption(emp).toLowerCase() === lower)
+                  const codeMatch = eligibleEmps.find((emp) => (emp.employee_code ?? '').toLowerCase() === lower)
+                  let match = exact ?? codeMatch
+                  if (!match) {
+                    const partial = eligibleEmps.filter((emp) => {
+                      const name = `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.toLowerCase()
+                      return (emp.employee_code ?? '').toLowerCase().startsWith(lower) || name.includes(lower)
+                    })
+                    if (partial.length === 1) match = partial[0]
+                  }
+                  if (match) {
+                    onChange({ user_id: match.user_id, department_id: match.department_id })
+                  }
+                }}
+              />
+              <datalist id="modal-employee-options">
+                {eligibleEmps.map((emp) => (
+                  <option key={emp.user_id} value={formatEmployeeOption(emp)} />
+                ))}
+              </datalist>
+            </label>
+            <label>
+              วันที่จะเข้า
+              <input type="date" value={form.booking_date?.slice(0,10) ?? ''} onChange={(e) => onChange({ booking_date: e.target.value })} />
+            </label>
+            <label>
+              ฝ่ายงาน
+              <select value={form.department_id ?? ''} onChange={(e) => onChange({ department_id: e.target.value, seat_id: '' })}>
+                <option value="">-- เลือกฝ่ายงาน --</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </label>
+            {seatRequired && (
+              <label>
+                ที่นั่ง (ฝ่ายนี้ต้องเลือกที่นั่งเฉพาะ)
+                <select value={form.seat_id ?? ''} onChange={(e) => onChange({ seat_id: e.target.value })}>
+                  <option value="">-- เลือกที่นั่ง --</option>
+                  {filteredSeats.map((s) => (
+                    <option key={s.id} value={s.id}>{s.seat_code}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label>
+              เหตุผลการเข้าออฟฟิศ
+              <select value={form.purpose_id ?? ''} onChange={(e) => onChange({ purpose_id: e.target.value })}>
+                <option value="">-- เลือกเหตุผล --</option>
+                {purposes.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              สถานะการจอง
+              <select value={form.status ?? 'BOOKED'} onChange={(e) => onChange({ status: e.target.value })}>
+                {statusOptions.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              บันทึกเพิ่มเติม
+              <textarea rows={3} value={form.note ?? ''} onChange={(e) => onChange({ note: e.target.value })} />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn secondary" onClick={onClose}>ยกเลิก</button>
+              <button type="submit" className="btn primary">บันทึก</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
