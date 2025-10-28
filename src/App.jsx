@@ -419,6 +419,23 @@ function App() {
     return seats.filter((seat) => seat.department_id === selectedDepartment)
   }, [seats, selectedDepartment])
 
+  // Employees eligible based on chosen department/office
+  const eligibleEmployees = useMemo(() => {
+    // If department chosen, restrict to that department only
+    if (selectedDepartment) {
+      return employees.filter((emp) => emp.department_id === selectedDepartment)
+    }
+    // If office chosen (but no department), restrict to employees in any dept of that office
+    if (selectedOffice) {
+      const deptIds = new Set(
+        departments.filter((d) => d.office_id === selectedOffice).map((d) => d.id),
+      )
+      return employees.filter((emp) => emp.department_id && deptIds.has(emp.department_id))
+    }
+    // No filter when nothing selected
+    return employees
+  }, [employees, departments, selectedDepartment, selectedOffice])
+
   const seatRequired = activeDepartment?.booking_strategy === 'ASSIGNED'
 
   useEffect(() => {
@@ -474,11 +491,12 @@ function App() {
       return
     }
     const lower = value.toLowerCase()
-    const exact = employees.find((emp) => formatEmployeeOption(emp).toLowerCase() === lower)
-    const codeMatch = employees.find((emp) => (emp.employee_code ?? '').toLowerCase() === lower)
+    // Match within eligible list only
+    const exact = eligibleEmployees.find((emp) => formatEmployeeOption(emp).toLowerCase() === lower)
+    const codeMatch = eligibleEmployees.find((emp) => (emp.employee_code ?? '').toLowerCase() === lower)
     let match = exact ?? codeMatch
     if (!match) {
-      const partialMatches = employees.filter((emp) => {
+      const partialMatches = eligibleEmployees.filter((emp) => {
         const name = `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.toLowerCase()
         return (
           (emp.employee_code ?? '').toLowerCase().startsWith(lower) ||
@@ -592,7 +610,7 @@ function App() {
               path="/booking"
               element={
                 <BookingPage
-                  employees={employees}
+                  employees={eligibleEmployees}
                   employeeSearch={employeeSearch}
                   onEmployeeSearchChange={handleEmployeeSearchChange}
                   selectedEmployee={selectedEmployee}
@@ -1341,7 +1359,7 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
             />
             <span>เปิดใช้งาน</span>
           </label>
-          <div className="form-footer">
+          <div className="form-footer centered">
             <button type="submit" className="btn primary" disabled={!supabaseConfigured}>
               {editingId ? 'บันทึกการแก้ไข' : 'เพิ่มพนักงาน'}
             </button>
@@ -1359,8 +1377,8 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
             <thead>
               <tr>
                 <th className="cell-nowrap">รหัส</th>
-                <th>ชื่อ-นามสกุล</th>
-                <th>อีเมล</th>
+                <th className="cell-nowrap">ชื่อ-นามสกุล</th>
+                <th className="cell-nowrap">อีเมล</th>
                 <th className="cell-nowrap">ฝ่ายงาน</th>
                 <th className="cell-nowrap">วันที่เริ่มงาน</th>
                 <th className="cell-nowrap">สถานะ</th>
@@ -1372,8 +1390,8 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
                 employees.map((employee) => (
                   <tr key={employee.user_id}>
                     <td className="cell-nowrap">{employee.employee_code}</td>
-                    <td>{`${employee.first_name ?? ''} ${employee.last_name ?? ''}`.trim()}</td>
-                    <td className="cell-wrap">{employee.email ?? '-'}</td>
+                    <td className="cell-nowrap">{`${employee.first_name ?? ''} ${employee.last_name ?? ''}`.trim()}</td>
+                    <td className="cell-nowrap">{employee.email ?? '-'}</td>
                     <td className="cell-nowrap">{departmentLookup.get(employee.department_id) ?? '-'}</td>
                     <td className="cell-nowrap">{formatDate(employee.start_date)}</td>
                     <td className="cell-nowrap">

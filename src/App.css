@@ -1,3 +1,8 @@
+/* Use border-box sizing so padding/border never cause overflow */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 .app-shell {
   min-height: 100vh;
   display: flex;
@@ -397,10 +402,23 @@ thead th {
   gap: 1rem;
 }
 
+/* Ensure inputs inside master forms never overflow the card */
+.master-form label { min-width: 0; }
+.master-form input:not([type='checkbox']),
+.master-form select,
+.master-form textarea {
+  width: 100%;
+  max-width: 100%;
+}
+
 .form-footer {
   display: flex;
   gap: 0.8rem;
   flex-wrap: wrap;
+}
+
+.form-footer.centered {
+  justify-content: center;
 }
 
 .checkbox {
@@ -526,7 +544,8 @@ thead th {
   font-size: 0.85rem;
   color: #7383a7;
   margin-top: 0.2rem;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .modal-actions {
