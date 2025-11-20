@@ -92,6 +92,8 @@ const SAMPLE_DATA = {
       status: 'BOOKED',
       purpose_name: 'Team Sync-Up',
       seat_code: 'ENG-01',
+      employee_code: 'EMP001',
+      employee_name: 'Arthit Prasert',
     },
     {
       booking_id: 'b2',
@@ -101,6 +103,8 @@ const SAMPLE_DATA = {
       status: 'BOOKED',
       purpose_name: 'Client Meeting',
       seat_code: null,
+      employee_code: 'EMP002',
+      employee_name: 'Warin Somsri',
     },
   ],
   booking_status_daily_summary: [
@@ -194,7 +198,11 @@ function App() {
   const [employeeSearch, setEmployeeSearch] = useState('')
   const [selectedEmployee, setSelectedEmployee] = useState(null)
 
-  const [bookingDate, setBookingDate] = useState(TODAY)
+  const [bookingMode, setBookingMode] = useState('range')
+  const [bookingStartDate, setBookingStartDate] = useState(TODAY)
+  const [bookingEndDate, setBookingEndDate] = useState(TODAY)
+  const [multiDateInput, setMultiDateInput] = useState(TODAY)
+  const [multiDates, setMultiDates] = useState([])
   const [selectedOffice, setSelectedOffice] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('')
   const [selectedSeat, setSelectedSeat] = useState('')
@@ -210,6 +218,9 @@ function App() {
   const [employeeYearly, setEmployeeYearly] = useState({ loading: true, rows: [] })
   const [historyReport, setHistoryReport] = useState({ loading: true, rows: [] })
   const [holidayReport, setHolidayReport] = useState({ loading: true, rows: [] })
+
+  // Booking editor modal state
+  const [editBookingState, setEditBookingState] = useState({ open: false, loading: false, id: null, form: null })
 
   const supabase = useMemo(() => {
     if (!ENV_SUPABASE_URL || !ENV_SUPABASE_ANON_KEY) return null
@@ -364,6 +375,76 @@ function App() {
     }
   }, [fetchView])
 
+  const openBookingEditor = useCallback(
+    async (bookingId) => {
+      setEditBookingState({ open: true, loading: true, id: bookingId, form: null })
+      try {
+        if (!supabase) {
+          // Fallback to data in calendar view for display only
+          const row = calendarState.rows.find((r) => r.booking_id === bookingId)
+          setEditBookingState({
+            open: true,
+            loading: false,
+            id: bookingId,
+            form: row
+              ? {
+                  booking_date: row.booking_date,
+                  department_id: departments.find((d) => d.name === row.department_name)?.id ?? '',
+                  purpose_id: purposes.find((p) => p.name === row.purpose_name)?.id ?? '',
+                  seat_id: seats.find((s) => s.seat_code === row.seat_code)?.id ?? '',
+                  note: '',
+                  status: row.status ?? 'BOOKED',
+                  user_id: null,
+                }
+              : null,
+          })
+          return
+        }
+        const { data, error } = await supabase.from('bookings').select('*').eq('id', bookingId).single()
+        if (error) throw error
+        setEditBookingState({ open: true, loading: false, id: bookingId, form: data })
+      } catch (error) {
+        console.error('Failed to load booking', error)
+        setEditBookingState({ open: true, loading: false, id: bookingId, form: null })
+        alert(error.message || 'ไม่สามารถโหลดข้อมูลการจองได้')
+      }
+    },
+    [supabase, calendarState.rows, departments, purposes, seats]
+  )
+
+  const closeBookingEditor = useCallback(() => setEditBookingState({ open: false, loading: false, id: null, form: null }), [])
+
+  const handleBookingEditChange = useCallback((patch) => {
+    setEditBookingState((prev) => ({ ...prev, form: { ...(prev.form ?? {}), ...patch } }))
+  }, [])
+
+  const saveBookingEdit = useCallback(async () => {
+    if (!supabaseConfigured || !supabase) {
+      alert(SUPABASE_ENV_HINT)
+      return
+    }
+    const f = editBookingState.form ?? {}
+    const payload = {
+      booking_date: f.booking_date,
+      department_id: f.department_id || null,
+      seat_id: f.seat_id || null,
+      purpose_id: f.purpose_id || null,
+      note: f.note || null,
+      status: f.status || 'BOOKED',
+      user_id: f.user_id || null,
+    }
+    try {
+      const { error } = await supabase.from('bookings').update(payload).eq('id', editBookingState.id)
+      if (error) throw error
+      alert('อัปเดตการจองเรียบร้อยแล้ว')
+      closeBookingEditor()
+      await Promise.all([reloadCalendar(), reloadHistory(), reloadDailyStatus(), reloadCapacity()])
+    } catch (error) {
+      console.error(error)
+      alert(error.message || 'ไม่สามารถอัปเดตการจองได้')
+    }
+  }, [supabaseConfigured, supabase, editBookingState.id, editBookingState.form, closeBookingEditor, reloadCalendar, reloadHistory, reloadDailyStatus, reloadCapacity])
+
   const reloadDepartments = useCallback(async () => {
     try {
       const rows = await fetchTable('departments')
@@ -418,6 +499,23 @@ function App() {
     if (!selectedDepartment) return []
     return seats.filter((seat) => seat.department_id === selectedDepartment)
   }, [seats, selectedDepartment])
+
+  // Employees eligible based on chosen department/office
+  const eligibleEmployees = useMemo(() => {
+    // If department chosen, restrict to that department only
+    if (selectedDepartment) {
+      return employees.filter((emp) => emp.department_id === selectedDepartment)
+    }
+    // If office chosen (but no department), restrict to employees in any dept of that office
+    if (selectedOffice) {
+      const deptIds = new Set(
+        departments.filter((d) => d.office_id === selectedOffice).map((d) => d.id),
+      )
+      return employees.filter((emp) => emp.department_id && deptIds.has(emp.department_id))
+    }
+    // No filter when nothing selected
+    return employees
+  }, [employees, departments, selectedDepartment, selectedOffice])
 
   const seatRequired = activeDepartment?.booking_strategy === 'ASSIGNED'
 
@@ -474,11 +572,12 @@ function App() {
       return
     }
     const lower = value.toLowerCase()
-    const exact = employees.find((emp) => formatEmployeeOption(emp).toLowerCase() === lower)
-    const codeMatch = employees.find((emp) => (emp.employee_code ?? '').toLowerCase() === lower)
+    // Match within eligible list only
+    const exact = eligibleEmployees.find((emp) => formatEmployeeOption(emp).toLowerCase() === lower)
+    const codeMatch = eligibleEmployees.find((emp) => (emp.employee_code ?? '').toLowerCase() === lower)
     let match = exact ?? codeMatch
     if (!match) {
-      const partialMatches = employees.filter((emp) => {
+      const partialMatches = eligibleEmployees.filter((emp) => {
         const name = `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.toLowerCase()
         return (
           (emp.employee_code ?? '').toLowerCase().startsWith(lower) ||
@@ -494,6 +593,43 @@ function App() {
     }
   }
 
+  const handleBookingModeChange = useCallback(
+    (mode) => {
+      setBookingMode(mode)
+      if (mode === 'range') {
+        if (!bookingStartDate) setBookingStartDate(TODAY)
+        if (!bookingEndDate) setBookingEndDate(TODAY)
+      } else {
+        if (!multiDateInput) setMultiDateInput(TODAY)
+      }
+    },
+    [bookingStartDate, bookingEndDate, multiDateInput],
+  )
+
+  const handleAddMultiDate = useCallback(() => {
+    if (!multiDateInput) {
+      alert('กรุณาเลือกวันที่ก่อนกดเพิ่ม')
+      return
+    }
+    const candidate = multiDateInput
+    const parsed = new Date(`${candidate}T00:00:00Z`)
+    if (Number.isNaN(parsed.getTime())) {
+      alert('วันที่ไม่ถูกต้อง')
+      return
+    }
+    if (multiDates.includes(candidate)) {
+      alert('เลือกวันดังกล่าวไว้แล้ว')
+      return
+    }
+    const next = [...multiDates, candidate].sort()
+    setMultiDates(next)
+    setMultiDateInput('')
+  }, [multiDateInput, multiDates])
+
+  const handleRemoveMultiDate = useCallback((target) => {
+    setMultiDates((prev) => prev.filter((date) => date !== target))
+  }, [])
+
   const handleBookingSubmit = async (event) => {
     event.preventDefault()
     if (!selectedEmployee) {
@@ -504,21 +640,50 @@ function App() {
       alert(SUPABASE_ENV_HINT)
       return
     }
+
+    let bookingDates = []
+    if (bookingMode === 'range') {
+      const start = bookingStartDate ? new Date(`${bookingStartDate}T00:00:00Z`) : null
+      const end = bookingEndDate ? new Date(`${bookingEndDate}T00:00:00Z`) : null
+      if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        alert('กรุณาเลือกวันที่ให้ถูกต้อง')
+        return
+      }
+      if (end < start) {
+        alert('วันที่สิ้นสุดต้องไม่น้อยกว่าวันที่เริ่มต้น')
+        return
+      }
+      const dayMs = 24 * 60 * 60 * 1000
+      for (let cursor = new Date(start); cursor <= end; cursor = new Date(cursor.getTime() + dayMs)) {
+        bookingDates.push(cursor.toISOString().slice(0, 10))
+      }
+    } else {
+      if (!multiDates.length) {
+        alert('กรุณาเพิ่มวันที่ที่ต้องการจองอย่างน้อย 1 วัน')
+        return
+      }
+      bookingDates = [...new Set(multiDates)].sort()
+    }
+
     try {
       const userId = selectedEmployee.user_id
-      const payload = {
-        booking_date: bookingDate,
+      const rows = bookingDates.map((booking_date) => ({
+        booking_date,
         department_id: selectedDepartment,
         seat_id: selectedSeat || null,
         purpose_id: selectedPurpose || null,
         note: note || null,
         user_id: userId,
-      }
-      const { error } = await supabase.from('bookings').insert(payload)
+      }))
+      const { error } = await supabase.from('bookings').insert(rows)
       if (error) throw error
       alert('บันทึกการจองเรียบร้อยแล้ว')
       setSelectedPurpose('')
       setNote('')
+      setBookingStartDate(TODAY)
+      setBookingEndDate(TODAY)
+      setMultiDates([])
+      setMultiDateInput(TODAY)
       await Promise.all([reloadCalendar(), reloadHistory(), reloadDailyStatus(), reloadCapacity()])
     } catch (error) {
       console.error(error)
@@ -527,12 +692,16 @@ function App() {
   }
 
   const handleBookingReset = () => {
+    setBookingMode('range')
     setSelectedOffice('')
     setSelectedDepartment('')
     setSelectedSeat('')
     setSelectedPurpose('')
     setNote('')
-    setBookingDate(TODAY)
+    setBookingStartDate(TODAY)
+    setBookingEndDate(TODAY)
+    setMultiDates([])
+    setMultiDateInput(TODAY)
     setSelectedEmployee(null)
     setEmployeeSearch('')
   }
@@ -558,7 +727,12 @@ function App() {
     }
   }
 
-  const bookingDisabled = !selectedEmployee || !selectedDepartment || (seatRequired && !selectedSeat)
+  const bookingDisabled =
+    !selectedEmployee ||
+    !selectedDepartment ||
+    (seatRequired && !selectedSeat) ||
+    (bookingMode === 'range' && (!bookingStartDate || !bookingEndDate)) ||
+    (bookingMode === 'multi' && multiDates.length === 0)
 
   return (
     <BrowserRouter>
@@ -592,12 +766,21 @@ function App() {
               path="/booking"
               element={
                 <BookingPage
-                  employees={employees}
+                  employees={eligibleEmployees}
                   employeeSearch={employeeSearch}
                   onEmployeeSearchChange={handleEmployeeSearchChange}
                   selectedEmployee={selectedEmployee}
-                  bookingDate={bookingDate}
-                  setBookingDate={setBookingDate}
+                  bookingMode={bookingMode}
+                  onBookingModeChange={handleBookingModeChange}
+                  bookingStartDate={bookingStartDate}
+                  bookingEndDate={bookingEndDate}
+                  setBookingStartDate={setBookingStartDate}
+                  setBookingEndDate={setBookingEndDate}
+                  multiDates={multiDates}
+                  multiDateInput={multiDateInput}
+                  setMultiDateInput={setMultiDateInput}
+                  onAddMultiDate={handleAddMultiDate}
+                  onRemoveMultiDate={handleRemoveMultiDate}
                   offices={offices}
                   selectedOffice={selectedOffice}
                   onOfficeChange={handleOfficeChange}
@@ -617,6 +800,7 @@ function App() {
                   onReset={handleBookingReset}
                   calendarState={calendarState}
                   bookingDisabled={bookingDisabled}
+                  onOpenBooking={openBookingEditor}
                 />
               }
             />
@@ -681,6 +865,20 @@ function App() {
           </Routes>
         </main>
       </div>
+      {editBookingState.open && (
+        <BookingEditModal
+          loading={editBookingState.loading}
+          form={editBookingState.form}
+          onChange={handleBookingEditChange}
+          onClose={closeBookingEditor}
+          onSave={saveBookingEdit}
+          departments={departments}
+          purposes={purposes}
+          seats={seats}
+          strategies={strategies}
+          employees={employees}
+        />
+      )}
     </BrowserRouter>
   )
 }
@@ -690,8 +888,17 @@ function BookingPage({
   employeeSearch,
   onEmployeeSearchChange,
   selectedEmployee,
-  bookingDate,
-  setBookingDate,
+  bookingMode,
+  onBookingModeChange,
+  bookingStartDate,
+  bookingEndDate,
+  setBookingStartDate,
+  setBookingEndDate,
+  multiDates,
+  multiDateInput,
+  setMultiDateInput,
+  onAddMultiDate,
+  onRemoveMultiDate,
   offices,
   selectedOffice,
   onOfficeChange,
@@ -711,6 +918,7 @@ function BookingPage({
   onReset,
   calendarState,
   bookingDisabled,
+  onOpenBooking,
 }) {
   return (
     <section className="tab-panel active">
@@ -740,10 +948,87 @@ function BookingPage({
               </span>
             )}
           </label>
-          <label>
-            วันที่จะเข้า
-            <input type="date" value={bookingDate} onChange={(e) => setBookingDate(e.target.value)} required />
-          </label>
+          <div className="span-2 booking-mode">
+            <span className="booking-mode-label">รูปแบบการจอง</span>
+            <div className="booking-mode-options">
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  name="booking-mode"
+                  value="range"
+                  checked={bookingMode === 'range'}
+                  onChange={(e) => onBookingModeChange(e.target.value)}
+                />
+                <span>ช่วงวันที่ต่อเนื่อง</span>
+              </label>
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  name="booking-mode"
+                  value="multi"
+                  checked={bookingMode === 'multi'}
+                  onChange={(e) => onBookingModeChange(e.target.value)}
+                />
+                <span>เลือกวันเฉพาะ</span>
+              </label>
+            </div>
+          </div>
+
+          {bookingMode === 'range' ? (
+            <div className="date-range span-2">
+              <label>
+                วันที่เริ่มต้น
+                <input
+                  type="date"
+                  lang="en-GB"
+                  value={bookingStartDate}
+                  onChange={(e) => setBookingStartDate(e.target.value)}
+                  required
+                />
+              </label>
+              <div className="range-sep" aria-hidden="true">ถึง</div>
+              <label>
+                วันที่สิ้นสุด
+                <input
+                  type="date"
+                  lang="en-GB"
+                  value={bookingEndDate}
+                  min={bookingStartDate}
+                  onChange={(e) => setBookingEndDate(e.target.value)}
+                  required
+                />
+              </label>
+            </div>
+          ) : (
+            <label className="span-2">
+              วันที่ที่ต้องการเข้าออฟฟิศ
+              <div className="multi-date-input">
+                <input
+                  type="date"
+                  lang="en-GB"
+                  value={multiDateInput}
+                  onChange={(e) => setMultiDateInput(e.target.value)}
+                />
+                <button type="button" className="btn secondary" onClick={onAddMultiDate}>
+                  เพิ่มวัน
+                </button>
+              </div>
+              {multiDates.length ? (
+                <ul className="date-chip-list">
+                  {multiDates.map((date) => (
+                    <li key={date} className="date-chip">
+                      <span>{formatDate(date)}</span>
+                      <button type="button" onClick={() => onRemoveMultiDate(date)} aria-label={`ลบ ${date}`}>
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="hint-text">ยังไม่ได้เลือกวันเพิ่มเติม</span>
+              )}
+            </label>
+          )}
           <label>
             ออฟฟิศ
             <select value={selectedOffice} onChange={onOfficeChange} disabled={Boolean(selectedEmployee)}>
@@ -810,11 +1095,22 @@ function BookingPage({
         <DataRegion state={calendarState}>
           <div className="calendar-grid">
             {calendarState.rows.map((item) => (
-              <article key={item.booking_id} className="calendar-card">
+              <article
+                key={item.booking_id}
+                className="calendar-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenBooking?.(item.booking_id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') onOpenBooking?.(item.booking_id)
+                }}
+              >
                 <h3>{formatDate(item.booking_date)}</h3>
                 <p className="calendar-meta">
                   {item.office_name ?? '-'} • {item.department_name ?? '-'}
                 </p>
+                <p className="calendar-meta">พนักงาน: {formatEmployeeCode(item) || '-'}</p>
+                <p className="calendar-meta employee-name">{formatEmployeeName(item) || '-'}</p>
                 <p className="calendar-meta">เหตุผล: {item.purpose_name ?? '-'}</p>
                 <StatusPill status={item.status} />
               </article>
@@ -1341,7 +1637,7 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
             />
             <span>เปิดใช้งาน</span>
           </label>
-          <div className="form-footer">
+          <div className="form-footer centered">
             <button type="submit" className="btn primary" disabled={!supabaseConfigured}>
               {editingId ? 'บันทึกการแก้ไข' : 'เพิ่มพนักงาน'}
             </button>
@@ -1359,8 +1655,8 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
             <thead>
               <tr>
                 <th className="cell-nowrap">รหัส</th>
-                <th>ชื่อ-นามสกุล</th>
-                <th>อีเมล</th>
+                <th className="cell-nowrap">ชื่อ-นามสกุล</th>
+                <th className="cell-nowrap">อีเมล</th>
                 <th className="cell-nowrap">ฝ่ายงาน</th>
                 <th className="cell-nowrap">วันที่เริ่มงาน</th>
                 <th className="cell-nowrap">สถานะ</th>
@@ -1372,8 +1668,8 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
                 employees.map((employee) => (
                   <tr key={employee.user_id}>
                     <td className="cell-nowrap">{employee.employee_code}</td>
-                    <td>{`${employee.first_name ?? ''} ${employee.last_name ?? ''}`.trim()}</td>
-                    <td className="cell-wrap">{employee.email ?? '-'}</td>
+                    <td className="cell-nowrap">{`${employee.first_name ?? ''} ${employee.last_name ?? ''}`.trim()}</td>
+                    <td className="cell-nowrap">{employee.email ?? '-'}</td>
                     <td className="cell-nowrap">{departmentLookup.get(employee.department_id) ?? '-'}</td>
                     <td className="cell-nowrap">{formatDate(employee.start_date)}</td>
                     <td className="cell-nowrap">
@@ -1731,3 +2027,153 @@ function formatMonth(value) {
 }
 
 export default App
+
+// Fallback formatter for employee name on booking rows coming from views
+function formatEmployeeFromRow(row) {
+  if (!row) return '-'
+  const code = row.employee_code ?? ''
+  const name = (
+    row.employee_name ?? [row.first_name, row.last_name].filter(Boolean).join('\u00A0').trim()
+  ) || ''
+  const both = [code, name].filter(Boolean).join(' - ')
+  return both || code || name || '-'
+}
+
+function formatEmployeeCode(row) {
+  return row?.employee_code ?? ''
+}
+
+function formatEmployeeName(row) {
+  const name = (
+    row?.employee_name ?? [row?.first_name, row?.last_name].filter(Boolean).join('\u00A0').trim()
+  ) || ''
+  return name
+}
+
+function BookingEditModal({ loading, form, onChange, onClose, onSave, departments, purposes, seats, strategies, employees }) {
+  const dept = useMemo(() => departments.find((d) => d.id === form?.department_id) ?? null, [departments, form])
+  const seatRequired = dept?.booking_strategy === 'ASSIGNED'
+  const filteredSeats = useMemo(() => {
+    if (!form?.department_id) return []
+    return seats.filter((s) => s.department_id === form.department_id)
+  }, [seats, form])
+  const statusOptions = ['BOOKED', 'CANCELLED']
+  const eligibleEmps = useMemo(() => {
+    if (form?.department_id) return employees.filter((e) => e.department_id === form.department_id)
+    return employees
+  }, [employees, form])
+
+  const [employeeSearch, setEmployeeSearch] = useState('')
+  useEffect(() => {
+    if (!form) return
+    const emp = employees.find((e) => e.user_id === form.user_id)
+    if (emp) setEmployeeSearch(formatEmployeeOption(emp))
+  }, [employees, form])
+
+  if (!form) return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>ดูรายละเอียดการจอง</h2>
+        <p className="hint">ไม่พบข้อมูลการจอง</p>
+        <div className="modal-actions">
+          <button className="btn secondary" onClick={onClose}>ปิด</button>
+        </div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>รายละเอียดการจอง</h2>
+        {loading ? (
+          <div className="loading-state"><div className="spinner" aria-hidden="true" /> กำลังโหลด...</div>
+        ) : (
+          <form className="modal-form" onSubmit={(e) => { e.preventDefault(); onSave(); }}>
+            <label>
+              พนักงาน
+              <input
+                type="text"
+                list="modal-employee-options"
+                placeholder="ระบุรหัส ชื่อ หรือ นามสกุล"
+                value={employeeSearch}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setEmployeeSearch(value)
+                  const lower = value.toLowerCase()
+                  const exact = eligibleEmps.find((emp) => formatEmployeeOption(emp).toLowerCase() === lower)
+                  const codeMatch = eligibleEmps.find((emp) => (emp.employee_code ?? '').toLowerCase() === lower)
+                  let match = exact ?? codeMatch
+                  if (!match) {
+                    const partial = eligibleEmps.filter((emp) => {
+                      const name = `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.toLowerCase()
+                      return (emp.employee_code ?? '').toLowerCase().startsWith(lower) || name.includes(lower)
+                    })
+                    if (partial.length === 1) match = partial[0]
+                  }
+                  if (match) {
+                    onChange({ user_id: match.user_id, department_id: match.department_id })
+                  }
+                }}
+              />
+              <datalist id="modal-employee-options">
+                {eligibleEmps.map((emp) => (
+                  <option key={emp.user_id} value={formatEmployeeOption(emp)} />
+                ))}
+              </datalist>
+            </label>
+            <label>
+              วันที่จะเข้า
+              <input type="date" lang="en-GB" value={form.booking_date?.slice(0,10) ?? ''} onChange={(e) => onChange({ booking_date: e.target.value })} />
+            </label>
+            <label>
+              ฝ่ายงาน
+              <select value={form.department_id ?? ''} onChange={(e) => onChange({ department_id: e.target.value, seat_id: '' })}>
+                <option value="">-- เลือกฝ่ายงาน --</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </label>
+            {seatRequired && (
+              <label>
+                ที่นั่ง (ฝ่ายนี้ต้องเลือกที่นั่งเฉพาะ)
+                <select value={form.seat_id ?? ''} onChange={(e) => onChange({ seat_id: e.target.value })}>
+                  <option value="">-- เลือกที่นั่ง --</option>
+                  {filteredSeats.map((s) => (
+                    <option key={s.id} value={s.id}>{s.seat_code}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label>
+              เหตุผลการเข้าออฟฟิศ
+              <select value={form.purpose_id ?? ''} onChange={(e) => onChange({ purpose_id: e.target.value })}>
+                <option value="">-- เลือกเหตุผล --</option>
+                {purposes.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              สถานะการจอง
+              <select value={form.status ?? 'BOOKED'} onChange={(e) => onChange({ status: e.target.value })}>
+                {statusOptions.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              บันทึกเพิ่มเติม
+              <textarea rows={3} value={form.note ?? ''} onChange={(e) => onChange({ note: e.target.value })} />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn secondary" onClick={onClose}>ยกเลิก</button>
+              <button type="submit" className="btn primary">บันทึก</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}

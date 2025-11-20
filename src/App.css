@@ -1,3 +1,8 @@
+/* Use border-box sizing so padding/border never cause overflow */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 .app-shell {
   min-height: 100vh;
   display: flex;
@@ -188,6 +193,7 @@ textarea {
 
 .span-2 {
   grid-column: span 2;
+  white-space: normal;
 }
 
 .form-actions {
@@ -195,6 +201,76 @@ textarea {
   gap: 0.8rem;
   flex-wrap: wrap;
   margin-top: 0.5rem;
+}
+
+.booking-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.booking-mode-label {
+  font-weight: 700;
+  color: #2b3d63;
+}
+
+.booking-mode-options {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  color: #2b3d63;
+}
+
+.radio-option input {
+  width: auto;
+  accent-color: #4f83ff;
+}
+
+.multi-date-input {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.date-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.date-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(79, 131, 255, 0.12);
+  color: #1f2f54;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-weight: 600;
+}
+
+.date-chip button {
+  border: none;
+  background: transparent;
+  color: #1f2f54;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.date-chip button:hover {
+  color: #b83232;
 }
 
 .calendar-grid {
@@ -209,6 +285,8 @@ textarea {
   border-radius: 16px;
   padding: 1rem;
   box-shadow: 0 10px 24px rgba(40, 69, 123, 0.08);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .calendar-card h3 {
@@ -217,8 +295,20 @@ textarea {
   white-space: nowrap;
 }
 
+.calendar-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(40, 69, 123, 0.12);
+}
+
 .calendar-meta {
   white-space: nowrap;
+}
+
+.calendar-meta.employee,
+.calendar-meta.employee-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-pill {
@@ -229,17 +319,34 @@ textarea {
   font-size: 0.85rem;
   background: rgba(79, 131, 255, 0.12);
   color: #3552b7;
+  border: 1px solid rgba(0,0,0,0.06);
   font-weight: 600;
 }
 
 .status-pill[data-status='BOOKED'] {
-  background: rgba(59, 177, 116, 0.18);
-  color: #2b7a4e;
+  background: #e9f7ef;
+  color: #1e7e34;
+  border-color: rgba(30, 126, 52, 0.25);
 }
 
 .status-pill[data-status='CANCELLED'] {
-  background: rgba(250, 114, 114, 0.16);
-  color: #b23838;
+  background: #fdecea;
+  color: #b3261e;
+  border-color: rgba(179, 38, 30, 0.25);
+}
+
+/* Optional: neutral/pending */
+.status-pill[data-status='PENDING'],
+.status-pill[data-status='REQUESTED'] {
+  background: #fff7e6;
+  color: #8a6d1a;
+  border-color: rgba(138, 109, 26, 0.25);
+}
+
+/* Ensure long employee line wraps inside card */
+.calendar-meta.wrap {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .inline-form {
@@ -387,6 +494,31 @@ thead th {
   box-shadow: 0 10px 24px rgba(79, 131, 255, 0.3);
 }
 
+/* Date range row on booking page */
+.date-range {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 1rem;
+  align-items: end;
+}
+
+.range-sep {
+  align-self: center;
+  color: #617199;
+  font-weight: 600;
+  padding: 0 0.25rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .date-range {
+    grid-template-columns: 1fr;
+  }
+  .range-sep {
+    display: none;
+  }
+}
+
 .master-layout {
   display: grid;
   gap: 1.5rem;
@@ -397,10 +529,23 @@ thead th {
   gap: 1rem;
 }
 
+/* Ensure inputs inside master forms never overflow the card */
+.master-form label { min-width: 0; }
+.master-form input:not([type='checkbox']),
+.master-form select,
+.master-form textarea {
+  width: 100%;
+  max-width: 100%;
+}
+
 .form-footer {
   display: flex;
   gap: 0.8rem;
   flex-wrap: wrap;
+}
+
+.form-footer.centered {
+  justify-content: center;
 }
 
 .checkbox {
@@ -526,7 +671,8 @@ thead th {
   font-size: 0.85rem;
   color: #7383a7;
   margin-top: 0.2rem;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .modal-actions {
