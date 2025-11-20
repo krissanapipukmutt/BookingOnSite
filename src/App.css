@@ -193,6 +193,7 @@ textarea {
 
 .span-2 {
   grid-column: span 2;
+  white-space: normal;
 }
 
 .form-actions {
@@ -200,6 +201,76 @@ textarea {
   gap: 0.8rem;
   flex-wrap: wrap;
   margin-top: 0.5rem;
+}
+
+.booking-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.booking-mode-label {
+  font-weight: 700;
+  color: #2b3d63;
+}
+
+.booking-mode-options {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  color: #2b3d63;
+}
+
+.radio-option input {
+  width: auto;
+  accent-color: #4f83ff;
+}
+
+.multi-date-input {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.date-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.date-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(79, 131, 255, 0.12);
+  color: #1f2f54;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-weight: 600;
+}
+
+.date-chip button {
+  border: none;
+  background: transparent;
+  color: #1f2f54;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.date-chip button:hover {
+  color: #b83232;
 }
 
 .calendar-grid {
@@ -421,6 +492,31 @@ thead th {
   color: #ffffff;
   border-color: rgba(49, 95, 230, 0.8);
   box-shadow: 0 10px 24px rgba(79, 131, 255, 0.3);
+}
+
+/* Date range row on booking page */
+.date-range {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 1rem;
+  align-items: end;
+}
+
+.range-sep {
+  align-self: center;
+  color: #617199;
+  font-weight: 600;
+  padding: 0 0.25rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .date-range {
+    grid-template-columns: 1fr;
+  }
+  .range-sep {
+    display: none;
+  }
 }
 
 .master-layout {

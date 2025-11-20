@@ -198,7 +198,11 @@ function App() {
   const [employeeSearch, setEmployeeSearch] = useState('')
   const [selectedEmployee, setSelectedEmployee] = useState(null)
 
-  const [bookingDate, setBookingDate] = useState(TODAY)
+  const [bookingMode, setBookingMode] = useState('range')
+  const [bookingStartDate, setBookingStartDate] = useState(TODAY)
+  const [bookingEndDate, setBookingEndDate] = useState(TODAY)
+  const [multiDateInput, setMultiDateInput] = useState(TODAY)
+  const [multiDates, setMultiDates] = useState([])
   const [selectedOffice, setSelectedOffice] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('')
   const [selectedSeat, setSelectedSeat] = useState('')
@@ -589,6 +593,43 @@ function App() {
     }
   }
 
+  const handleBookingModeChange = useCallback(
+    (mode) => {
+      setBookingMode(mode)
+      if (mode === 'range') {
+        if (!bookingStartDate) setBookingStartDate(TODAY)
+        if (!bookingEndDate) setBookingEndDate(TODAY)
+      } else {
+        if (!multiDateInput) setMultiDateInput(TODAY)
+      }
+    },
+    [bookingStartDate, bookingEndDate, multiDateInput],
+  )
+
+  const handleAddMultiDate = useCallback(() => {
+    if (!multiDateInput) {
+      alert('กรุณาเลือกวันที่ก่อนกดเพิ่ม')
+      return
+    }
+    const candidate = multiDateInput
+    const parsed = new Date(`${candidate}T00:00:00Z`)
+    if (Number.isNaN(parsed.getTime())) {
+      alert('วันที่ไม่ถูกต้อง')
+      return
+    }
+    if (multiDates.includes(candidate)) {
+      alert('เลือกวันดังกล่าวไว้แล้ว')
+      return
+    }
+    const next = [...multiDates, candidate].sort()
+    setMultiDates(next)
+    setMultiDateInput('')
+  }, [multiDateInput, multiDates])
+
+  const handleRemoveMultiDate = useCallback((target) => {
+    setMultiDates((prev) => prev.filter((date) => date !== target))
+  }, [])
+
   const handleBookingSubmit = async (event) => {
     event.preventDefault()
     if (!selectedEmployee) {
@@ -599,21 +640,50 @@ function App() {
       alert(SUPABASE_ENV_HINT)
       return
     }
+
+    let bookingDates = []
+    if (bookingMode === 'range') {
+      const start = bookingStartDate ? new Date(`${bookingStartDate}T00:00:00Z`) : null
+      const end = bookingEndDate ? new Date(`${bookingEndDate}T00:00:00Z`) : null
+      if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        alert('กรุณาเลือกวันที่ให้ถูกต้อง')
+        return
+      }
+      if (end < start) {
+        alert('วันที่สิ้นสุดต้องไม่น้อยกว่าวันที่เริ่มต้น')
+        return
+      }
+      const dayMs = 24 * 60 * 60 * 1000
+      for (let cursor = new Date(start); cursor <= end; cursor = new Date(cursor.getTime() + dayMs)) {
+        bookingDates.push(cursor.toISOString().slice(0, 10))
+      }
+    } else {
+      if (!multiDates.length) {
+        alert('กรุณาเพิ่มวันที่ที่ต้องการจองอย่างน้อย 1 วัน')
+        return
+      }
+      bookingDates = [...new Set(multiDates)].sort()
+    }
+
     try {
       const userId = selectedEmployee.user_id
-      const payload = {
-        booking_date: bookingDate,
+      const rows = bookingDates.map((booking_date) => ({
+        booking_date,
         department_id: selectedDepartment,
         seat_id: selectedSeat || null,
         purpose_id: selectedPurpose || null,
         note: note || null,
         user_id: userId,
-      }
-      const { error } = await supabase.from('bookings').insert(payload)
+      }))
+      const { error } = await supabase.from('bookings').insert(rows)
       if (error) throw error
       alert('บันทึกการจองเรียบร้อยแล้ว')
       setSelectedPurpose('')
       setNote('')
+      setBookingStartDate(TODAY)
+      setBookingEndDate(TODAY)
+      setMultiDates([])
+      setMultiDateInput(TODAY)
       await Promise.all([reloadCalendar(), reloadHistory(), reloadDailyStatus(), reloadCapacity()])
     } catch (error) {
       console.error(error)
@@ -622,12 +692,16 @@ function App() {
   }
 
   const handleBookingReset = () => {
+    setBookingMode('range')
     setSelectedOffice('')
     setSelectedDepartment('')
     setSelectedSeat('')
     setSelectedPurpose('')
     setNote('')
-    setBookingDate(TODAY)
+    setBookingStartDate(TODAY)
+    setBookingEndDate(TODAY)
+    setMultiDates([])
+    setMultiDateInput(TODAY)
     setSelectedEmployee(null)
     setEmployeeSearch('')
   }
@@ -653,7 +727,12 @@ function App() {
     }
   }
 
-  const bookingDisabled = !selectedEmployee || !selectedDepartment || (seatRequired && !selectedSeat)
+  const bookingDisabled =
+    !selectedEmployee ||
+    !selectedDepartment ||
+    (seatRequired && !selectedSeat) ||
+    (bookingMode === 'range' && (!bookingStartDate || !bookingEndDate)) ||
+    (bookingMode === 'multi' && multiDates.length === 0)
 
   return (
     <BrowserRouter>
@@ -691,8 +770,17 @@ function App() {
                   employeeSearch={employeeSearch}
                   onEmployeeSearchChange={handleEmployeeSearchChange}
                   selectedEmployee={selectedEmployee}
-                  bookingDate={bookingDate}
-                  setBookingDate={setBookingDate}
+                  bookingMode={bookingMode}
+                  onBookingModeChange={handleBookingModeChange}
+                  bookingStartDate={bookingStartDate}
+                  bookingEndDate={bookingEndDate}
+                  setBookingStartDate={setBookingStartDate}
+                  setBookingEndDate={setBookingEndDate}
+                  multiDates={multiDates}
+                  multiDateInput={multiDateInput}
+                  setMultiDateInput={setMultiDateInput}
+                  onAddMultiDate={handleAddMultiDate}
+                  onRemoveMultiDate={handleRemoveMultiDate}
                   offices={offices}
                   selectedOffice={selectedOffice}
                   onOfficeChange={handleOfficeChange}
@@ -800,8 +888,17 @@ function BookingPage({
   employeeSearch,
   onEmployeeSearchChange,
   selectedEmployee,
-  bookingDate,
-  setBookingDate,
+  bookingMode,
+  onBookingModeChange,
+  bookingStartDate,
+  bookingEndDate,
+  setBookingStartDate,
+  setBookingEndDate,
+  multiDates,
+  multiDateInput,
+  setMultiDateInput,
+  onAddMultiDate,
+  onRemoveMultiDate,
   offices,
   selectedOffice,
   onOfficeChange,
@@ -851,10 +948,87 @@ function BookingPage({
               </span>
             )}
           </label>
-          <label>
-            วันที่จะเข้า
-            <input type="date" value={bookingDate} onChange={(e) => setBookingDate(e.target.value)} required />
-          </label>
+          <div className="span-2 booking-mode">
+            <span className="booking-mode-label">รูปแบบการจอง</span>
+            <div className="booking-mode-options">
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  name="booking-mode"
+                  value="range"
+                  checked={bookingMode === 'range'}
+                  onChange={(e) => onBookingModeChange(e.target.value)}
+                />
+                <span>ช่วงวันที่ต่อเนื่อง</span>
+              </label>
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  name="booking-mode"
+                  value="multi"
+                  checked={bookingMode === 'multi'}
+                  onChange={(e) => onBookingModeChange(e.target.value)}
+                />
+                <span>เลือกวันเฉพาะ</span>
+              </label>
+            </div>
+          </div>
+
+          {bookingMode === 'range' ? (
+            <div className="date-range span-2">
+              <label>
+                วันที่เริ่มต้น
+                <input
+                  type="date"
+                  lang="en-GB"
+                  value={bookingStartDate}
+                  onChange={(e) => setBookingStartDate(e.target.value)}
+                  required
+                />
+              </label>
+              <div className="range-sep" aria-hidden="true">ถึง</div>
+              <label>
+                วันที่สิ้นสุด
+                <input
+                  type="date"
+                  lang="en-GB"
+                  value={bookingEndDate}
+                  min={bookingStartDate}
+                  onChange={(e) => setBookingEndDate(e.target.value)}
+                  required
+                />
+              </label>
+            </div>
+          ) : (
+            <label className="span-2">
+              วันที่ที่ต้องการเข้าออฟฟิศ
+              <div className="multi-date-input">
+                <input
+                  type="date"
+                  lang="en-GB"
+                  value={multiDateInput}
+                  onChange={(e) => setMultiDateInput(e.target.value)}
+                />
+                <button type="button" className="btn secondary" onClick={onAddMultiDate}>
+                  เพิ่มวัน
+                </button>
+              </div>
+              {multiDates.length ? (
+                <ul className="date-chip-list">
+                  {multiDates.map((date) => (
+                    <li key={date} className="date-chip">
+                      <span>{formatDate(date)}</span>
+                      <button type="button" onClick={() => onRemoveMultiDate(date)} aria-label={`ลบ ${date}`}>
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="hint-text">ยังไม่ได้เลือกวันเพิ่มเติม</span>
+              )}
+            </label>
+          )}
           <label>
             ออฟฟิศ
             <select value={selectedOffice} onChange={onOfficeChange} disabled={Boolean(selectedEmployee)}>
@@ -1950,7 +2124,7 @@ function BookingEditModal({ loading, form, onChange, onClose, onSave, department
             </label>
             <label>
               วันที่จะเข้า
-              <input type="date" value={form.booking_date?.slice(0,10) ?? ''} onChange={(e) => onChange({ booking_date: e.target.value })} />
+              <input type="date" lang="en-GB" value={form.booking_date?.slice(0,10) ?? ''} onChange={(e) => onChange({ booking_date: e.target.value })} />
             </label>
             <label>
               ฝ่ายงาน
