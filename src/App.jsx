@@ -975,33 +975,37 @@ function BookingPage({
           </div>
 
           {bookingMode === 'range' ? (
-            <>
+            <div className="date-range span-2">
               <label>
                 วันที่เริ่มต้น
                 <input
                   type="date"
+                  lang="en-GB"
                   value={bookingStartDate}
                   onChange={(e) => setBookingStartDate(e.target.value)}
                   required
                 />
               </label>
+              <div className="range-sep" aria-hidden="true">ถึง</div>
               <label>
                 วันที่สิ้นสุด
                 <input
                   type="date"
+                  lang="en-GB"
                   value={bookingEndDate}
                   min={bookingStartDate}
                   onChange={(e) => setBookingEndDate(e.target.value)}
                   required
                 />
               </label>
-            </>
+            </div>
           ) : (
             <label className="span-2">
               วันที่ที่ต้องการเข้าออฟฟิศ
               <div className="multi-date-input">
                 <input
                   type="date"
+                  lang="en-GB"
                   value={multiDateInput}
                   onChange={(e) => setMultiDateInput(e.target.value)}
                 />
@@ -2120,7 +2124,7 @@ function BookingEditModal({ loading, form, onChange, onClose, onSave, department
             </label>
             <label>
               วันที่จะเข้า
-              <input type="date" value={form.booking_date?.slice(0,10) ?? ''} onChange={(e) => onChange({ booking_date: e.target.value })} />
+              <input type="date" lang="en-GB" value={form.booking_date?.slice(0,10) ?? ''} onChange={(e) => onChange({ booking_date: e.target.value })} />
             </label>
             <label>
               ฝ่ายงาน
