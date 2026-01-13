@@ -357,6 +357,11 @@ textarea {
   margin-bottom: 1.4rem;
 }
 
+.inline-form textarea {
+  height: 2.6rem;
+  resize: none;
+}
+
 .table-wrapper {
   overflow-x: auto;
 }
