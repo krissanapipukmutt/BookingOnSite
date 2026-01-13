@@ -5,7 +5,7 @@ import './App.css'
 
 const ENV_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? ''
 const ENV_SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
-const SUPABASE_ENV_HINT = 'กรุณาตั้งค่า VITE_SUPABASE_URL และ VITE_SUPABASE_ANON_KEY ในไฟล์ .env.local ก่อนใช้งาน'
+const SUPABASE_ENV_HINT = 'กรุณาตั้งค่า VITE_SUPABASE_URL และ VITE_SUPABASE_ANON_KEY ในไฟล์ .env หรือ .env.local ก่อนใช้งาน'
 
 const pad = (value) => String(value).padStart(2, '0')
 const today = new Date()
@@ -225,7 +225,15 @@ function App() {
   const supabase = useMemo(() => {
     if (!ENV_SUPABASE_URL || !ENV_SUPABASE_ANON_KEY) return null
     try {
-      return createClient(ENV_SUPABASE_URL, ENV_SUPABASE_ANON_KEY, { db: { schema: 'boksite' } })
+      return createClient(ENV_SUPABASE_URL, ENV_SUPABASE_ANON_KEY, {
+        db: { schema: 'boksite' },
+        global: {
+          headers: {
+            apikey: ENV_SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${ENV_SUPABASE_ANON_KEY}`,
+          },
+        },
+      })
     } catch (error) {
       console.error('Failed to initialise Supabase client', error)
       return null
@@ -714,8 +722,9 @@ function App() {
     try {
       const { error } = await supabase.from('company_holidays').insert({
         holiday_date: formData.get('holiday_date'),
-        name: formData.get('name'),
+        name: formData.get('holiday_name'),
         office_id: formData.get('office_id') || null,
+        description: formData.get('description') || null,
       })
       if (error) throw error
       await reloadHolidayOverview()
@@ -1142,7 +1151,11 @@ function HolidayPage({ offices, holidayState, onSubmit }) {
           </label>
           <label>
             ชื่อวันหยุด
-            <input type="text" name="name" placeholder="เช่น วันปีใหม่" required />
+            <input type="text" name="holiday_name" placeholder="เช่น วันปีใหม่" required />
+          </label>
+          <label>
+            รายละเอียด
+            <textarea name="description" rows="1" placeholder="เช่น บริษัทปิดทำการ"></textarea>
           </label>
           <label>
             ออฟฟิศ (เว้นว่าง = ทุกออฟฟิศ)
