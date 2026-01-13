@@ -320,14 +320,39 @@ function App() {
     setHolidayState({ loading: true, rows: [] })
     setHolidayReport({ loading: true, rows: [] })
     try {
-      const rows = await fetchView('office_holiday_overview')
+      if (!supabase) {
+        const rows = await fetchView('office_holiday_overview')
+        const normalized = rows.map((row, index) => ({
+          ...row,
+          id: row.id ?? `sample-holiday-${index}`,
+          office_id: row.office_id ?? null,
+        }))
+        setHolidayState({ loading: false, rows: normalized })
+        setHolidayReport({ loading: false, rows: normalized })
+        return
+      }
+      const { data, error } = await supabase
+        .from('company_holidays')
+        .select('id, holiday_date, name, description, office_id')
+        .order('holiday_date', { ascending: true })
+        .order('office_id', { ascending: true })
+      if (error) throw error
+      const officeLookup = new Map(offices.map((office) => [office.id, office.name]))
+      const rows = (data ?? []).map((item) => ({
+        id: item.id,
+        holiday_date: item.holiday_date,
+        holiday_name: item.name,
+        office_id: item.office_id,
+        office_name: item.office_id ? officeLookup.get(item.office_id) ?? '-' : 'All Offices',
+        description: item.description,
+      }))
       setHolidayState({ loading: false, rows })
       setHolidayReport({ loading: false, rows })
     } catch (error) {
       setHolidayState({ loading: false, rows: [] })
       setHolidayReport({ loading: false, rows: [] })
     }
-  }, [fetchView])
+  }, [fetchView, offices, supabase])
 
   const reloadDailyStatus = useCallback(async () => {
     setDailyStatus({ loading: true, rows: [] })
@@ -714,27 +739,68 @@ function App() {
     setEmployeeSearch('')
   }
 
-  const handleHolidaySubmit = async (formData) => {
-    if (!supabaseConfigured) {
-      alert(SUPABASE_ENV_HINT)
-      return false
-    }
-    try {
-      const { error } = await supabase.from('company_holidays').insert({
-        holiday_date: formData.get('holiday_date'),
-        name: formData.get('holiday_name'),
-        office_id: formData.get('office_id') || null,
-        description: formData.get('description') || null,
-      })
-      if (error) throw error
-      await reloadHolidayOverview()
-      return true
-    } catch (error) {
-      console.error(error)
-      alert(error.message || 'ไม่สามารถเพิ่มวันหยุดได้')
-      return false
-    }
-  }
+  const createHoliday = useCallback(
+    async (payload) => {
+      if (!supabaseConfigured || !supabase) {
+        alert(SUPABASE_ENV_HINT)
+        return false
+      }
+      try {
+        const { error } = await supabase.from('company_holidays').insert(payload)
+        if (error) throw error
+        alert('เพิ่มวันหยุดเรียบร้อยแล้ว')
+        await reloadHolidayOverview()
+        return true
+      } catch (error) {
+        console.error(error)
+        alert(error.message || 'ไม่สามารถเพิ่มวันหยุดได้')
+        return false
+      }
+    },
+    [supabaseConfigured, supabase, reloadHolidayOverview],
+  )
+
+  const updateHoliday = useCallback(
+    async (holidayId, payload) => {
+      if (!supabaseConfigured || !supabase) {
+        alert(SUPABASE_ENV_HINT)
+        return false
+      }
+      try {
+        const { error } = await supabase.from('company_holidays').update(payload).eq('id', holidayId)
+        if (error) throw error
+        alert('อัปเดตวันหยุดเรียบร้อยแล้ว')
+        await reloadHolidayOverview()
+        return true
+      } catch (error) {
+        console.error(error)
+        alert(error.message || 'ไม่สามารถอัปเดตวันหยุดได้')
+        return false
+      }
+    },
+    [supabaseConfigured, supabase, reloadHolidayOverview],
+  )
+
+  const deleteHoliday = useCallback(
+    async (holidayId) => {
+      if (!supabaseConfigured || !supabase) {
+        alert(SUPABASE_ENV_HINT)
+        return false
+      }
+      try {
+        const { error } = await supabase.from('company_holidays').delete().eq('id', holidayId)
+        if (error) throw error
+        alert('ลบวันหยุดเรียบร้อยแล้ว')
+        await reloadHolidayOverview()
+        return true
+      } catch (error) {
+        console.error(error)
+        alert(error.message || 'ไม่สามารถลบวันหยุดได้')
+        return false
+      }
+    },
+    [supabaseConfigured, supabase, reloadHolidayOverview],
+  )
 
   const bookingDisabled =
     !selectedEmployee ||
@@ -819,7 +885,10 @@ function App() {
                 <HolidayPage
                   offices={offices}
                   holidayState={holidayState}
-                  onSubmit={handleHolidaySubmit}
+                  onCreate={createHoliday}
+                  onUpdate={updateHoliday}
+                  onDelete={deleteHoliday}
+                  supabaseConfigured={supabaseConfigured}
                 />
               }
             />
@@ -1131,12 +1200,61 @@ function BookingPage({
   )
 }
 
-function HolidayPage({ offices, holidayState, onSubmit }) {
+function HolidayPage({ offices, holidayState, onCreate, onUpdate, onDelete, supabaseConfigured }) {
+  const [editingId, setEditingId] = useState(null)
+  const [form, setForm] = useState({
+    holiday_date: '',
+    holiday_name: '',
+    office_id: '',
+    description: '',
+  })
+
+  const resetForm = useCallback(() => {
+    setEditingId(null)
+    setForm({
+      holiday_date: '',
+      holiday_name: '',
+      office_id: '',
+      description: '',
+    })
+  }, [])
+
   const handleSubmit = async (event) => {
     event.preventDefault()
-    const success = await onSubmit(new FormData(event.currentTarget))
+    const holidayName = form.holiday_name.trim()
+    if (!form.holiday_date || !holidayName) {
+      alert('กรุณากรอกข้อมูลให้ครบ')
+      return
+    }
+    const payload = {
+      holiday_date: form.holiday_date,
+      name: holidayName,
+      office_id: form.office_id || null,
+      description: form.description.trim() || null,
+    }
+    const success = editingId ? await onUpdate(editingId, payload) : await onCreate(payload)
     if (success) {
-      event.currentTarget.reset()
+      resetForm()
+    }
+  }
+
+  const handleEdit = (row) => {
+    setEditingId(row.id ?? null)
+    setForm({
+      holiday_date: row.holiday_date ?? '',
+      holiday_name: row.holiday_name ?? '',
+      office_id: row.office_id ?? '',
+      description: row.description ?? '',
+    })
+  }
+
+  const handleDelete = async (row) => {
+    if (!row.id) return
+    const confirmed = window.confirm('ยืนยันการลบวันหยุดนี้หรือไม่?')
+    if (!confirmed) return
+    const success = await onDelete(row.id)
+    if (success && editingId === row.id) {
+      resetForm()
     }
   }
 
@@ -1147,19 +1265,42 @@ function HolidayPage({ offices, holidayState, onSubmit }) {
         <form className="inline-form" onSubmit={handleSubmit}>
           <label>
             วันที่หยุด
-            <input type="date" name="holiday_date" required />
+            <input
+              type="date"
+              name="holiday_date"
+              value={form.holiday_date}
+              onChange={(e) => setForm((prev) => ({ ...prev, holiday_date: e.target.value }))}
+              required
+            />
           </label>
           <label>
             ชื่อวันหยุด
-            <input type="text" name="holiday_name" placeholder="เช่น วันปีใหม่" required />
+            <input
+              type="text"
+              name="holiday_name"
+              placeholder="เช่น วันปีใหม่"
+              value={form.holiday_name}
+              onChange={(e) => setForm((prev) => ({ ...prev, holiday_name: e.target.value }))}
+              required
+            />
           </label>
           <label>
             รายละเอียด
-            <textarea name="description" rows="1" placeholder="เช่น บริษัทปิดทำการ"></textarea>
+            <textarea
+              name="description"
+              rows="1"
+              placeholder="เช่น บริษัทปิดทำการ"
+              value={form.description}
+              onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+            ></textarea>
           </label>
           <label>
             ออฟฟิศ (เว้นว่าง = ทุกออฟฟิศ)
-            <select name="office_id">
+            <select
+              name="office_id"
+              value={form.office_id}
+              onChange={(e) => setForm((prev) => ({ ...prev, office_id: e.target.value }))}
+            >
               <option value="">ทุกออฟฟิศ</option>
               {offices.map((office) => (
                 <option key={office.id} value={office.id}>
@@ -1168,9 +1309,14 @@ function HolidayPage({ offices, holidayState, onSubmit }) {
               ))}
             </select>
           </label>
-          <button type="submit" className="btn primary">
-            เพิ่มวันหยุด
-          </button>
+          <div className="form-actions">
+            <button type="submit" className="btn primary" disabled={!supabaseConfigured}>
+              {editingId ? 'บันทึกการแก้ไข' : 'เพิ่มวันหยุด'}
+            </button>
+            <button type="button" className="btn secondary" onClick={resetForm}>
+              {editingId ? 'ยกเลิก' : 'ล้างฟอร์ม'}
+            </button>
+          </div>
         </form>
 
         <div className="table-wrapper">
@@ -1182,17 +1328,46 @@ function HolidayPage({ offices, holidayState, onSubmit }) {
                   <th>ชื่อวันหยุด</th>
                   <th className="cell-nowrap">ออฟฟิศ</th>
                   <th>รายละเอียด</th>
+                  <th className="cell-nowrap">จัดการ</th>
                 </tr>
               </thead>
               <tbody>
-                {holidayState.rows.map((row, index) => (
-                  <tr key={`${row.holiday_date}-${row.office_name ?? 'all'}-${index}`}>
-                    <td className="cell-nowrap">{formatDate(row.holiday_date)}</td>
-                    <td>{row.holiday_name}</td>
-                    <td className="cell-nowrap">{row.office_name}</td>
-                    <td className="cell-wrap">{row.description ?? '-'}</td>
+                {holidayState.rows.length ? (
+                  holidayState.rows.map((row, index) => (
+                    <tr key={row.id ?? `${row.holiday_date}-${row.office_name ?? 'all'}-${index}`}>
+                      <td className="cell-nowrap">{formatDate(row.holiday_date)}</td>
+                      <td>{row.holiday_name}</td>
+                      <td className="cell-nowrap">{row.office_name}</td>
+                      <td className="cell-wrap">{row.description ?? '-'}</td>
+                      <td className="cell-nowrap">
+                        <div className="table-actions">
+                          <button
+                            type="button"
+                            className="btn small"
+                            onClick={() => handleEdit(row)}
+                            disabled={!row.id}
+                          >
+                            แก้ไข
+                          </button>
+                          <button
+                            type="button"
+                            className="btn danger small"
+                            onClick={() => handleDelete(row)}
+                            disabled={!supabaseConfigured || !row.id}
+                          >
+                            ลบ
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="empty-cell">
+                      ยังไม่มีข้อมูลวันหยุด
+                    </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </DataRegion>
