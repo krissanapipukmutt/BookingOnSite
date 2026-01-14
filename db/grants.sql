@@ -1,29 +1,50 @@
 -- Grants for Supabase anon/authenticated roles to access the boksite schema.
--- Run in Supabase SQL editor.
+-- Run in Supabase SQL editor. This is intended for dev/demo environments.
 
 grant usage on schema boksite to anon, authenticated;
-grant select on all tables in schema boksite to anon, authenticated;
-grant insert, update, delete on boksite.bookings to anon, authenticated;
-grant insert, update, delete on boksite.company_holidays to anon, authenticated;
+grant select, insert, update, delete on all tables in schema boksite to anon, authenticated;
+grant usage, select on all sequences in schema boksite to anon, authenticated;
 
--- If RLS is enabled, add open policies (uncomment as needed).
--- alter table boksite.bookings enable row level security;
--- alter table boksite.company_holidays enable row level security;
---
--- drop policy if exists "anon read bookings" on boksite.bookings;
--- create policy "anon read bookings" on boksite.bookings for select using (true);
--- drop policy if exists "anon insert bookings" on boksite.bookings;
--- create policy "anon insert bookings" on boksite.bookings for insert with check (true);
--- drop policy if exists "anon update bookings" on boksite.bookings;
--- create policy "anon update bookings" on boksite.bookings for update using (true) with check (true);
--- drop policy if exists "anon delete bookings" on boksite.bookings;
--- create policy "anon delete bookings" on boksite.bookings for delete using (true);
---
--- drop policy if exists "anon read holidays" on boksite.company_holidays;
--- create policy "anon read holidays" on boksite.company_holidays for select using (true);
--- drop policy if exists "anon insert holidays" on boksite.company_holidays;
--- create policy "anon insert holidays" on boksite.company_holidays for insert with check (true);
--- drop policy if exists "anon update holidays" on boksite.company_holidays;
--- create policy "anon update holidays" on boksite.company_holidays for update using (true) with check (true);
--- drop policy if exists "anon delete holidays" on boksite.company_holidays;
--- create policy "anon delete holidays" on boksite.company_holidays for delete using (true);
+-- Open RLS policies for all tables in boksite (dev/demo only).
+do $$
+declare
+  tbl record;
+  policy_exists int;
+begin
+  for tbl in
+    select n.nspname as schemaname, c.relname as tablename
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'boksite' and c.relkind in ('r', 'p')
+  loop
+    execute format('alter table %I.%I enable row level security', tbl.schemaname, tbl.tablename);
+
+    select count(*) into policy_exists
+    from pg_policies
+    where schemaname = tbl.schemaname and tablename = tbl.tablename and policyname = 'open_select';
+    if policy_exists = 0 then
+      execute format('create policy "open_select" on %I.%I for select using (true)', tbl.schemaname, tbl.tablename);
+    end if;
+
+    select count(*) into policy_exists
+    from pg_policies
+    where schemaname = tbl.schemaname and tablename = tbl.tablename and policyname = 'open_insert';
+    if policy_exists = 0 then
+      execute format('create policy "open_insert" on %I.%I for insert with check (true)', tbl.schemaname, tbl.tablename);
+    end if;
+
+    select count(*) into policy_exists
+    from pg_policies
+    where schemaname = tbl.schemaname and tablename = tbl.tablename and policyname = 'open_update';
+    if policy_exists = 0 then
+      execute format('create policy "open_update" on %I.%I for update using (true) with check (true)', tbl.schemaname, tbl.tablename);
+    end if;
+
+    select count(*) into policy_exists
+    from pg_policies
+    where schemaname = tbl.schemaname and tablename = tbl.tablename and policyname = 'open_delete';
+    if policy_exists = 0 then
+      execute format('create policy "open_delete" on %I.%I for delete using (true)', tbl.schemaname, tbl.tablename);
+    end if;
+  end loop;
+end $$;
