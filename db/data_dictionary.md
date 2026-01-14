@@ -38,9 +38,11 @@
 
 ### booking_purposes
 - `id: uuid` คีย์หลัก
-- `code: text` รหัสวัตถุประสงค์ (ไม่ซ้ำ)
-- `name: text` ชื่อวัตถุประสงค์ (ไม่ซ้ำ)
+- `name: text` ชื่อวัตถุประสงค์
+- `description: text` รายละเอียด (ถ้ามี)
+- `is_active: boolean` สถานะการใช้งาน
 - `created_at: timestamptz`
+- `updated_at: timestamptz`
 
 ความสัมพันธ์: ถูกอ้างโดย `bookings.purpose_id`
 
@@ -112,4 +114,3 @@
 ## หมายเหตุด้านสิทธิ์ (สำหรับทดสอบแบบไม่มีล็อกอิน)
 ต้อง Grant สิทธิ์ให้ role `anon` และสร้าง RLS Policy แบบเปิดสำหรับตารางที่ต้องเขียน เช่น `bookings`, `company_holidays`
 (ดูตัวอย่างสคริปต์ในคำตอบก่อนหน้าได้ หรือให้ผมจัดทำไฟล์ grants.sql เพิ่มให้ได้)
-

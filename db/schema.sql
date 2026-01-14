@@ -63,9 +63,23 @@ create index if not exists idx_seats_dept on boksite.department_seats(department
 -- Booking Purposes
 create table if not exists boksite.booking_purposes (
   id uuid primary key default gen_random_uuid(),
-  code text not null unique,
-  name text not null unique,
-  created_at timestamptz not null default now()
+  name text not null,
+  description text null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+insert into boksite.booking_purposes (name, description, is_active)
+select v.name, v.description, v.is_active
+from (
+  values
+    ('Team Sync-Up','ประชุมทีม', true),
+    ('Client Meeting','พบลูกค้า', true),
+    ('Training Session','อบรม', true)
+) as v(name, description, is_active)
+where not exists (
+  select 1 from boksite.booking_purposes bp where bp.name = v.name
 );
 
 -- Employee Profiles
@@ -196,4 +210,3 @@ left join boksite.offices o on o.id = ch.office_id
 order by ch.holiday_date asc, office_name;
 
 -- End of schema
-

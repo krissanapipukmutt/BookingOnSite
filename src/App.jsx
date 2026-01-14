@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import { createClient } from '@supabase/supabase-js'
 import './App.css'
@@ -12,10 +12,67 @@ const today = new Date()
 const TODAY = today.toISOString().slice(0, 10)
 const CURRENT_MONTH = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`
 
+const toDateString = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+
+const getMonthRange = (monthValue) => {
+  const [year, month] = String(monthValue ?? '').split('-').map(Number)
+  if (!year || !month) {
+    const fallback = new Date()
+    return {
+      start: new Date(fallback.getFullYear(), fallback.getMonth(), 1),
+      end: new Date(fallback.getFullYear(), fallback.getMonth() + 1, 1),
+    }
+  }
+  return {
+    start: new Date(year, month - 1, 1),
+    end: new Date(year, month, 1),
+  }
+}
+
+const shiftMonth = (monthValue, delta) => {
+  const [year, month] = String(monthValue ?? '').split('-').map(Number)
+  const base = year && month ? new Date(year, month - 1, 1) : new Date()
+  const moved = new Date(base.getFullYear(), base.getMonth() + delta, 1)
+  return `${moved.getFullYear()}-${pad(moved.getMonth() + 1)}`
+}
+
+const formatMonthLabel = (monthValue) => {
+  const [year, month] = String(monthValue ?? '').split('-').map(Number)
+  if (!year || !month) return monthValue ?? ''
+  const date = new Date(year, month - 1, 1)
+  return date.toLocaleDateString('th-TH-u-ca-gregory', { month: 'long', year: 'numeric' })
+}
+
+const getYearGridStart = (year) => {
+  const targetYear = Number.isFinite(year) ? year : today.getFullYear()
+  const clampedYear = Math.min(Math.max(targetYear, CALENDAR_YEAR_START), CALENDAR_YEAR_END)
+  const offset = clampedYear - CALENDAR_YEAR_START
+  return CALENDAR_YEAR_START + Math.floor(offset / YEAR_GRID_SIZE) * YEAR_GRID_SIZE
+}
+
 const DEFAULT_STRATEGIES = [
   { code: 'UNLIMITED', display_name: 'Unlimited', description: 'Departments with no capacity limit' },
   { code: 'CAPACITY', display_name: 'Capacity Limited', description: 'Departments with numeric daily capacity' },
   { code: 'ASSIGNED', display_name: 'Seat Assigned', description: 'Departments requiring specific seats' },
+]
+
+const CALENDAR_PREVIEW_LIMIT = 3
+const YEAR_GRID_SIZE = 12
+const CALENDAR_YEAR_START = 2000
+const CALENDAR_YEAR_END = 2050
+const MONTH_OPTIONS = [
+  { value: '01', label: 'ม.ค.' },
+  { value: '02', label: 'ก.พ.' },
+  { value: '03', label: 'มี.ค.' },
+  { value: '04', label: 'เม.ย.' },
+  { value: '05', label: 'พ.ค.' },
+  { value: '06', label: 'มิ.ย.' },
+  { value: '07', label: 'ก.ค.' },
+  { value: '08', label: 'ส.ค.' },
+  { value: '09', label: 'ก.ย.' },
+  { value: '10', label: 'ต.ค.' },
+  { value: '11', label: 'พ.ย.' },
+  { value: '12', label: 'ธ.ค.' },
 ]
 
 const SAMPLE_DATA = {
@@ -37,9 +94,9 @@ const SAMPLE_DATA = {
     { id: 'seat-4', seat_code: 'SALE-02', department_id: 'dept-4' },
   ],
   booking_purposes: [
-    { id: 'purpose-1', code: 'TEAM_SYNC', name: 'Team Sync-Up' },
-    { id: 'purpose-2', code: 'CLIENT_MEET', name: 'Client Meeting' },
-    { id: 'purpose-3', code: 'TRAINING', name: 'Training Session' },
+    { id: 'purpose-1', name: 'Team Sync-Up' },
+    { id: 'purpose-2', name: 'Client Meeting' },
+    { id: 'purpose-3', name: 'Training Session' },
   ],
   employee_profiles: [
     {
@@ -209,6 +266,7 @@ function App() {
   const [selectedPurpose, setSelectedPurpose] = useState('')
   const [note, setNote] = useState('')
   const [monthFilter, setMonthFilter] = useState(CURRENT_MONTH)
+  const [calendarMonth, setCalendarMonth] = useState(CURRENT_MONTH)
 
   const [calendarState, setCalendarState] = useState({ loading: true, rows: [] })
   const [holidayState, setHolidayState] = useState({ loading: true, rows: [] })
@@ -309,12 +367,31 @@ function App() {
   const reloadCalendar = useCallback(async () => {
     setCalendarState({ loading: true, rows: [] })
     try {
-      const rows = await fetchView('employee_booking_history', { limit: 12 })
-      setCalendarState({ loading: false, rows })
+      const { start, end } = getMonthRange(calendarMonth)
+      const startDate = toDateString(start)
+      const endDate = toDateString(end)
+      if (!supabase) {
+        const rows = await fetchView('employee_booking_history')
+        const filtered = rows.filter(
+          (row) => row.booking_date && row.booking_date >= startDate && row.booking_date < endDate,
+        )
+        setCalendarState({ loading: false, rows: filtered })
+        return
+      }
+      const { data, error } = await supabase
+        .from('employee_booking_history')
+        .select('*')
+        .order('booking_date', { ascending: true })
+      if (error) throw error
+      const filtered = (data ?? []).filter((row) => {
+        const dateKey = row.booking_date?.slice(0, 10)
+        return dateKey && dateKey >= startDate && dateKey < endDate
+      })
+      setCalendarState({ loading: false, rows: filtered })
     } catch (error) {
       setCalendarState({ loading: false, rows: [] })
     }
-  }, [fetchView])
+  }, [calendarMonth, fetchView, supabase])
 
   const reloadHolidayOverview = useCallback(async () => {
     setHolidayState({ loading: true, rows: [] })
@@ -457,6 +534,11 @@ function App() {
       return
     }
     const f = editBookingState.form ?? {}
+    const bookingId = f.id ?? editBookingState.id
+    if (!bookingId) {
+      alert('ไม่พบรหัสการจองสำหรับการอัปเดต')
+      return
+    }
     const payload = {
       booking_date: f.booking_date,
       department_id: f.department_id || null,
@@ -467,8 +549,12 @@ function App() {
       user_id: f.user_id || null,
     }
     try {
-      const { error } = await supabase.from('bookings').update(payload).eq('id', editBookingState.id)
+      const { data, error } = await supabase.from('bookings').update(payload).eq('id', bookingId).select('id')
       if (error) throw error
+      if (!data?.length) {
+        alert('ไม่พบรายการจองที่ต้องการอัปเดต (ตรวจสอบสิทธิ์ RLS ของตาราง bookings)')
+        return
+      }
       alert('อัปเดตการจองเรียบร้อยแล้ว')
       closeBookingEditor()
       await Promise.all([reloadCalendar(), reloadHistory(), reloadDailyStatus(), reloadCapacity()])
@@ -692,10 +778,20 @@ function App() {
       }
     } else {
       if (!multiDates.length) {
-        alert('กรุณาเพิ่มวันที่ที่ต้องการจองอย่างน้อย 1 วัน')
-        return
+        if (!multiDateInput) {
+          alert('กรุณาเลือกวันที่ที่ต้องการจองอย่างน้อย 1 วัน')
+          return
+        }
+        const candidate = multiDateInput
+        const parsed = new Date(`${candidate}T00:00:00Z`)
+        if (Number.isNaN(parsed.getTime())) {
+          alert('วันที่ไม่ถูกต้อง')
+          return
+        }
+        bookingDates = [candidate]
+      } else {
+        bookingDates = [...new Set(multiDates)].sort()
       }
-      bookingDates = [...new Set(multiDates)].sort()
     }
 
     try {
@@ -807,7 +903,7 @@ function App() {
     !selectedDepartment ||
     (seatRequired && !selectedSeat) ||
     (bookingMode === 'range' && (!bookingStartDate || !bookingEndDate)) ||
-    (bookingMode === 'multi' && multiDates.length === 0)
+    (bookingMode === 'multi' && multiDates.length === 0 && !multiDateInput)
 
   return (
     <BrowserRouter>
@@ -874,6 +970,8 @@ function App() {
                   onSubmit={handleBookingSubmit}
                   onReset={handleBookingReset}
                   calendarState={calendarState}
+                  calendarMonth={calendarMonth}
+                  onCalendarMonthChange={setCalendarMonth}
                   bookingDisabled={bookingDisabled}
                   onOpenBooking={openBookingEditor}
                 />
@@ -961,6 +1059,159 @@ function App() {
   )
 }
 
+function MonthYearPicker({ value, onChange }) {
+  const pickerRef = useRef(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerView, setPickerView] = useState('month')
+
+  const [calendarYearValue, calendarMonthValue] = useMemo(() => {
+    const [year, month] = String(value ?? '').split('-')
+    const yearNumber = Number(year)
+    const monthNumber = Number(month)
+    const safeYear = Number.isFinite(yearNumber) && yearNumber > 0 ? yearNumber : today.getFullYear()
+    const safeMonth =
+      Number.isFinite(monthNumber) && monthNumber >= 1 && monthNumber <= 12 ? pad(monthNumber) : pad(today.getMonth() + 1)
+    return [String(safeYear), safeMonth]
+  }, [value])
+
+  const [yearGridStart, setYearGridStart] = useState(() => getYearGridStart(Number(calendarYearValue)))
+  const yearGridMaxStart = Math.max(CALENDAR_YEAR_START, CALENDAR_YEAR_END - YEAR_GRID_SIZE + 1)
+  const yearGridLabelEnd = Math.min(yearGridStart + YEAR_GRID_SIZE - 1, CALENDAR_YEAR_END)
+  const yearGridYears = useMemo(() => {
+    const years = []
+    for (let year = yearGridStart; year <= yearGridLabelEnd; year += 1) {
+      years.push(year)
+    }
+    return years
+  }, [yearGridStart, yearGridLabelEnd])
+
+  const calendarLabel = formatMonthLabel(`${calendarYearValue}-${calendarMonthValue}`)
+
+  const handlePickCurrentMonth = useCallback(() => {
+    const now = new Date()
+    const next = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
+    onChange?.(next)
+    setPickerView('month')
+    setPickerOpen(false)
+  }, [onChange])
+
+  useEffect(() => {
+    if (!pickerOpen) return
+    setYearGridStart(getYearGridStart(Number(calendarYearValue)))
+  }, [pickerOpen, calendarYearValue])
+
+  useEffect(() => {
+    if (!pickerOpen) return
+    const handleClick = (event) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target)) {
+        setPickerOpen(false)
+      }
+    }
+    const handleKey = (event) => {
+      if (event.key === 'Escape') setPickerOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [pickerOpen])
+
+  return (
+    <div className="calendar-picker" ref={pickerRef}>
+      <button
+        type="button"
+        className="calendar-picker-button"
+        onClick={() => {
+          setPickerView('month')
+          setPickerOpen((prev) => !prev)
+        }}
+        aria-label="เลือกเดือนและปี"
+      >
+        <span>{calendarLabel}</span>
+        <span className="calendar-picker-caret">▾</span>
+      </button>
+      {pickerOpen && (
+        <div className="calendar-picker-popover" role="dialog" aria-label="เลือกเดือนและปี">
+          {pickerView === 'month' ? (
+            <>
+              <div className="calendar-picker-header">
+                <span className="calendar-picker-heading">เลือกเดือน</span>
+                <div className="calendar-picker-actions">
+                  <button type="button" className="calendar-now-button" onClick={handlePickCurrentMonth}>
+                    เดือนปัจจุบัน
+                  </button>
+                  <button type="button" className="calendar-year-button" onClick={() => setPickerView('year')}>
+                    {calendarYearValue}
+                  </button>
+                </div>
+              </div>
+              <div className="calendar-month-grid">
+                {MONTH_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`calendar-month-option ${option.value === calendarMonthValue ? 'active' : ''}`}
+                    onClick={() => {
+                      onChange?.(`${calendarYearValue}-${option.value}`)
+                      setPickerOpen(false)
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="calendar-year-header">
+                <button
+                  type="button"
+                  className="btn tertiary small"
+                  onClick={() => setYearGridStart((prev) => Math.max(CALENDAR_YEAR_START, prev - YEAR_GRID_SIZE))}
+                  disabled={yearGridStart <= CALENDAR_YEAR_START}
+                >
+                  ก่อนหน้า
+                </button>
+                <span className="calendar-year-range">
+                  {yearGridStart} - {yearGridLabelEnd}
+                </span>
+                <button
+                  type="button"
+                  className="btn tertiary small"
+                  onClick={() => setYearGridStart((prev) => Math.min(yearGridMaxStart, prev + YEAR_GRID_SIZE))}
+                  disabled={yearGridStart >= yearGridMaxStart}
+                >
+                  ถัดไป
+                </button>
+              </div>
+              <div className="calendar-year-grid">
+                {yearGridYears.map((year) => (
+                  <button
+                    key={year}
+                    type="button"
+                    className={`calendar-year-option ${String(year) === calendarYearValue ? 'active' : ''}`}
+                    onClick={() => {
+                      onChange?.(`${year}-${calendarMonthValue}`)
+                      setPickerView('month')
+                    }}
+                  >
+                    {year}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="calendar-year-back" onClick={() => setPickerView('month')}>
+                กลับไปเลือกเดือน
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function BookingPage({
   employees,
   employeeSearch,
@@ -995,9 +1246,54 @@ function BookingPage({
   onSubmit,
   onReset,
   calendarState,
+  calendarMonth,
+  onCalendarMonthChange,
   bookingDisabled,
   onOpenBooking,
 }) {
+  const [dayModal, setDayModal] = useState({ open: false, date: '', entries: [] })
+
+  const openDayModal = useCallback((dateKey, entries) => {
+    setDayModal({ open: true, date: dateKey, entries })
+  }, [])
+
+  const closeDayModal = useCallback(() => {
+    setDayModal({ open: false, date: '', entries: [] })
+  }, [])
+
+  const calendarDays = useMemo(() => {
+    const [year, month] = String(calendarMonth ?? '').split('-').map(Number)
+    const baseDate = year && month ? new Date(year, month - 1, 1) : new Date()
+    const monthIndex = baseDate.getMonth()
+    const firstOfMonth = new Date(baseDate.getFullYear(), monthIndex, 1)
+    const startOffset = firstOfMonth.getDay()
+    const startDate = new Date(baseDate.getFullYear(), monthIndex, 1 - startOffset)
+    const days = []
+    for (let i = 0; i < 42; i += 1) {
+      const date = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i)
+      days.push({
+        date,
+        dateKey: toDateString(date),
+        inMonth: date.getMonth() === monthIndex,
+      })
+    }
+    return days
+  }, [calendarMonth])
+
+  const bookingsByDate = useMemo(() => {
+    const map = new Map()
+    calendarState.rows.forEach((row) => {
+      const dateKey = row.booking_date?.slice(0, 10)
+      if (!dateKey) return
+      if (!map.has(dateKey)) map.set(dateKey, [])
+      map.get(dateKey).push(row)
+    })
+    return map
+  }, [calendarState.rows])
+
+  const weekDays = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส']
+  const todayKey = TODAY
+
   return (
     <section className="tab-panel active">
       <div className="card">
@@ -1059,6 +1355,8 @@ function BookingPage({
                 <input
                   type="date"
                   lang="en-GB"
+                  data-date={formatDateInput(bookingStartDate)}
+                  data-empty={bookingStartDate ? 'false' : 'true'}
                   value={bookingStartDate}
                   onChange={(e) => setBookingStartDate(e.target.value)}
                   required
@@ -1070,6 +1368,8 @@ function BookingPage({
                 <input
                   type="date"
                   lang="en-GB"
+                  data-date={formatDateInput(bookingEndDate)}
+                  data-empty={bookingEndDate ? 'false' : 'true'}
                   value={bookingEndDate}
                   min={bookingStartDate}
                   onChange={(e) => setBookingEndDate(e.target.value)}
@@ -1084,6 +1384,8 @@ function BookingPage({
                 <input
                   type="date"
                   lang="en-GB"
+                  data-date={formatDateInput(multiDateInput)}
+                  data-empty={multiDateInput ? 'false' : 'true'}
                   value={multiDateInput}
                   onChange={(e) => setMultiDateInput(e.target.value)}
                 />
@@ -1169,34 +1471,127 @@ function BookingPage({
       </div>
 
       <div className="card">
-        <h2>ปฏิทินการจองล่าสุด</h2>
-        <DataRegion state={calendarState}>
-          <div className="calendar-grid">
-            {calendarState.rows.map((item) => (
-              <article
-                key={item.booking_id}
-                className="calendar-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => onOpenBooking?.(item.booking_id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') onOpenBooking?.(item.booking_id)
-                }}
-              >
-                <h3>{formatDate(item.booking_date)}</h3>
-                <p className="calendar-meta">
-                  {item.office_name ?? '-'} • {item.department_name ?? '-'}
-                </p>
-                <p className="calendar-meta">พนักงาน: {formatEmployeeCode(item) || '-'}</p>
-                <p className="calendar-meta employee-name">{formatEmployeeName(item) || '-'}</p>
-                <p className="calendar-meta">เหตุผล: {item.purpose_name ?? '-'}</p>
-                <StatusPill status={item.status} />
-              </article>
-            ))}
+        <div className="calendar-header">
+          <h2>ปฏิทินการจองล่าสุด</h2>
+          <div className="calendar-controls">
+            <button
+              type="button"
+              className="btn secondary small"
+              onClick={() => onCalendarMonthChange?.(shiftMonth(calendarMonth, -1))}
+            >
+              เดือนก่อนหน้า
+            </button>
+            <MonthYearPicker value={calendarMonth} onChange={onCalendarMonthChange} />
+            <button
+              type="button"
+              className="btn secondary small"
+              onClick={() => onCalendarMonthChange?.(shiftMonth(calendarMonth, 1))}
+            >
+              เดือนถัดไป
+            </button>
+          </div>
+        </div>
+        <DataRegion state={calendarState} allowEmpty>
+          <div className="calendar-body">
+            <div className="calendar-weekdays">
+              {weekDays.map((day) => (
+                <div key={day} className="calendar-weekday">
+                  {day}
+                </div>
+              ))}
+            </div>
+            <div className="calendar-grid">
+              {calendarDays.map((day) => {
+                const entries = bookingsByDate.get(day.dateKey) ?? []
+                return (
+                  <div
+                    key={day.dateKey}
+                    className={`calendar-cell ${day.inMonth ? '' : 'is-outside'} ${day.dateKey === todayKey ? 'is-today' : ''}`}
+                  >
+                    <div className="calendar-date">{day.date.getDate()}</div>
+                    <div className="calendar-bookings">
+                      {entries.slice(0, CALENDAR_PREVIEW_LIMIT).map((entry) => {
+                        const status = (entry.status ?? '').toUpperCase()
+                        const statusClass = status === 'CANCELLED' ? 'is-cancelled' : 'is-booked'
+                        return (
+                          <button
+                            key={entry.booking_id}
+                            type="button"
+                            className={`calendar-booking ${statusClass}`}
+                            onClick={() => onOpenBooking?.(entry.booking_id)}
+                            title={`${formatEmployeeFromRow(entry)} • ${entry.purpose_name ?? '-'}`}
+                          >
+                            {formatEmployeeFromRow(entry)}
+                          </button>
+                        )
+                      })}
+                      {entries.length > CALENDAR_PREVIEW_LIMIT && (
+                        <button
+                          type="button"
+                          className="calendar-more"
+                          onClick={() => openDayModal(day.dateKey, entries)}
+                        >
+                          +อีก {entries.length - CALENDAR_PREVIEW_LIMIT}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </DataRegion>
       </div>
+      {dayModal.open && (
+        <DayBookingModal
+          date={dayModal.date}
+          entries={dayModal.entries}
+          onClose={closeDayModal}
+          onEdit={(bookingId) => {
+            closeDayModal()
+            onOpenBooking?.(bookingId)
+          }}
+        />
+      )}
     </section>
+  )
+}
+
+function DayBookingModal({ date, entries, onClose, onEdit }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>รายการจองวันที่ {formatDate(date)}</h2>
+        <div className="day-booking-list">
+          {entries.map((entry) => (
+            <div key={entry.booking_id} className="day-booking-item">
+              <div className="day-booking-info">
+                <span className="day-booking-name">{formatEmployeeFromRow(entry)}</span>
+                <span className="day-booking-meta">
+                  {entry.department_name ?? '-'} • {entry.purpose_name ?? '-'}
+                </span>
+              </div>
+              <div className="day-booking-actions">
+                <StatusPill status={entry.status} />
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => onEdit(entry.booking_id)}
+                  disabled={!entry.booking_id}
+                >
+                  แก้ไข
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>
+            ปิด
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -1267,6 +1662,9 @@ function HolidayPage({ offices, holidayState, onCreate, onUpdate, onDelete, supa
             วันที่หยุด
             <input
               type="date"
+              lang="en-GB"
+              data-date={formatDateInput(form.holiday_date)}
+              data-empty={form.holiday_date ? 'false' : 'true'}
               name="holiday_date"
               value={form.holiday_date}
               onChange={(e) => setForm((prev) => ({ ...prev, holiday_date: e.target.value }))}
@@ -1517,7 +1915,7 @@ function DepartmentMasterPage({ supabase, supabaseConfigured, departments, offic
     <section className="tab-panel active master-layout">
       <div className="card">
         <h2>จัดการฝ่ายงาน</h2>
-        <p className="hint-text">สร้างหรือแก้ไขฝ่ายงาน พร้อมกำหนดกลยุทธ์การจอง</p>
+        <p className="hint-text">สร้างหรือแก้ไขฝ่ายงาน พร้อมกำหนดประเภทการจอง</p>
         {!supabaseConfigured && (
           <p className="hint warning">เชื่อมต่อ Supabase เพื่อบันทึกข้อมูลจริง ระบบกำลังใช้ข้อมูลตัวอย่าง</p>
         )}
@@ -1543,7 +1941,7 @@ function DepartmentMasterPage({ supabase, supabaseConfigured, departments, offic
             />
           </label>
           <label>
-            กลยุทธ์การจอง
+            ประเภทการจอง
             <select value={form.booking_strategy} onChange={handleStrategyChange}>
               {strategyOptions.map((strategy) => (
                 <option key={strategy.code} value={strategy.code}>
@@ -1591,7 +1989,7 @@ function DepartmentMasterPage({ supabase, supabaseConfigured, departments, offic
               <tr>
                 <th>ชื่อฝ่ายงาน</th>
                 <th className="cell-nowrap">ออฟฟิศ</th>
-                <th className="cell-nowrap">กลยุทธ์</th>
+                <th className="cell-nowrap">ประเภท</th>
                 <th className="cell-nowrap">ความจุ</th>
                 <th className="cell-nowrap">สถานะ</th>
                 <th className="cell-nowrap">จัดการ</th>
@@ -1813,6 +2211,9 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
             วันที่เริ่มงาน
             <input
               type="date"
+              lang="en-GB"
+              data-date={formatDateInput(form.start_date)}
+              data-empty={form.start_date ? 'false' : 'true'}
               value={form.start_date}
               onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))}
             />
@@ -1918,12 +2319,9 @@ function ReportsPage({
   const handleMonthSubmit = useCallback(
     (event) => {
       event.preventDefault()
-      const formData = new FormData(event.currentTarget)
-      const monthValue = formData.get('month')
-      setMonthFilter(monthValue || '')
-      reloadDeptMonthly(monthValue || '')
+      reloadDeptMonthly(monthFilter)
     },
-    [reloadDeptMonthly, setMonthFilter]
+    [reloadDeptMonthly, monthFilter]
   )
 
   const reports = useMemo(
@@ -1974,7 +2372,7 @@ function ReportsPage({
         onRefresh: () => reloadDeptMonthly(monthFilter),
         actions: (
           <form className="filter-form" onSubmit={handleMonthSubmit}>
-            <input type="month" name="month" defaultValue={monthFilter} />
+            <MonthYearPicker value={monthFilter} onChange={setMonthFilter} />
             <button type="submit" className="btn tertiary">
               ดูข้อมูล
             </button>
@@ -2162,9 +2560,9 @@ function ReportTable({ rows, columns }) {
   )
 }
 
-function DataRegion({ state, children }) {
+function DataRegion({ state, children, allowEmpty = false }) {
   if (state.loading) return <LoadingState />
-  if (!state.rows.length) return <EmptyState message="ไม่มีข้อมูลสำหรับช่วงนี้" />
+  if (!state.rows.length && !allowEmpty) return <EmptyState message="ไม่มีข้อมูลสำหรับช่วงนี้" />
   return children
 }
 
@@ -2205,6 +2603,15 @@ function formatDate(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function formatDateInput(value) {
+  if (!value) return 'dd/mm/yyyy'
+  const parts = value.split('-')
+  if (parts.length !== 3) return value
+  const [year, month, day] = parts
+  if (!year || !month || !day) return value
+  return `${day}/${month}/${year}`
 }
 
 function formatMonth(value) {
@@ -2312,7 +2719,14 @@ function BookingEditModal({ loading, form, onChange, onClose, onSave, department
             </label>
             <label>
               วันที่จะเข้า
-              <input type="date" lang="en-GB" value={form.booking_date?.slice(0,10) ?? ''} onChange={(e) => onChange({ booking_date: e.target.value })} />
+              <input
+                type="date"
+                lang="en-GB"
+                data-date={formatDateInput(form.booking_date?.slice(0, 10) ?? '')}
+                data-empty={form.booking_date ? 'false' : 'true'}
+                value={form.booking_date?.slice(0, 10) ?? ''}
+                onChange={(e) => onChange({ booking_date: e.target.value })}
+              />
             </label>
             <label>
               ฝ่ายงาน
