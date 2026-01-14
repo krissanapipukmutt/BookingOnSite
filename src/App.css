@@ -180,6 +180,30 @@ textarea {
   font: inherit;
 }
 
+input[type='date'] {
+  position: relative;
+  color: transparent;
+}
+
+input[type='date']::before {
+  content: attr(data-date);
+  position: absolute;
+  left: 0.9rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #23324d;
+}
+
+input[type='date'][data-empty='true']::before {
+  color: #9aa7c0;
+}
+
+input[type='date']::-webkit-datetime-edit,
+input[type='date']::-webkit-inner-spin-button,
+input[type='date']::-webkit-clear-button {
+  color: transparent;
+}
+
 input:focus,
 select:focus,
 textarea:focus {

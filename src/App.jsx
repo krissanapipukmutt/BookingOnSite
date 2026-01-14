@@ -94,9 +94,9 @@ const SAMPLE_DATA = {
     { id: 'seat-4', seat_code: 'SALE-02', department_id: 'dept-4' },
   ],
   booking_purposes: [
-    { id: 'purpose-1', code: 'TEAM_SYNC', name: 'Team Sync-Up' },
-    { id: 'purpose-2', code: 'CLIENT_MEET', name: 'Client Meeting' },
-    { id: 'purpose-3', code: 'TRAINING', name: 'Training Session' },
+    { id: 'purpose-1', name: 'Team Sync-Up' },
+    { id: 'purpose-2', name: 'Client Meeting' },
+    { id: 'purpose-3', name: 'Training Session' },
   ],
   employee_profiles: [
     {
@@ -1355,6 +1355,8 @@ function BookingPage({
                 <input
                   type="date"
                   lang="en-GB"
+                  data-date={formatDateInput(bookingStartDate)}
+                  data-empty={bookingStartDate ? 'false' : 'true'}
                   value={bookingStartDate}
                   onChange={(e) => setBookingStartDate(e.target.value)}
                   required
@@ -1366,6 +1368,8 @@ function BookingPage({
                 <input
                   type="date"
                   lang="en-GB"
+                  data-date={formatDateInput(bookingEndDate)}
+                  data-empty={bookingEndDate ? 'false' : 'true'}
                   value={bookingEndDate}
                   min={bookingStartDate}
                   onChange={(e) => setBookingEndDate(e.target.value)}
@@ -1380,6 +1384,8 @@ function BookingPage({
                 <input
                   type="date"
                   lang="en-GB"
+                  data-date={formatDateInput(multiDateInput)}
+                  data-empty={multiDateInput ? 'false' : 'true'}
                   value={multiDateInput}
                   onChange={(e) => setMultiDateInput(e.target.value)}
                 />
@@ -1656,6 +1662,9 @@ function HolidayPage({ offices, holidayState, onCreate, onUpdate, onDelete, supa
             วันที่หยุด
             <input
               type="date"
+              lang="en-GB"
+              data-date={formatDateInput(form.holiday_date)}
+              data-empty={form.holiday_date ? 'false' : 'true'}
               name="holiday_date"
               value={form.holiday_date}
               onChange={(e) => setForm((prev) => ({ ...prev, holiday_date: e.target.value }))}
@@ -2202,6 +2211,9 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
             วันที่เริ่มงาน
             <input
               type="date"
+              lang="en-GB"
+              data-date={formatDateInput(form.start_date)}
+              data-empty={form.start_date ? 'false' : 'true'}
               value={form.start_date}
               onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))}
             />
@@ -2593,6 +2605,15 @@ function formatDate(value) {
   return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+function formatDateInput(value) {
+  if (!value) return 'dd/mm/yyyy'
+  const parts = value.split('-')
+  if (parts.length !== 3) return value
+  const [year, month, day] = parts
+  if (!year || !month || !day) return value
+  return `${day}/${month}/${year}`
+}
+
 function formatMonth(value) {
   if (!value) return '-'
   const date = new Date(value)
@@ -2698,7 +2719,14 @@ function BookingEditModal({ loading, form, onChange, onClose, onSave, department
             </label>
             <label>
               วันที่จะเข้า
-              <input type="date" lang="en-GB" value={form.booking_date?.slice(0,10) ?? ''} onChange={(e) => onChange({ booking_date: e.target.value })} />
+              <input
+                type="date"
+                lang="en-GB"
+                data-date={formatDateInput(form.booking_date?.slice(0, 10) ?? '')}
+                data-empty={form.booking_date ? 'false' : 'true'}
+                value={form.booking_date?.slice(0, 10) ?? ''}
+                onChange={(e) => onChange({ booking_date: e.target.value })}
+              />
             </label>
             <label>
               ฝ่ายงาน
