@@ -778,10 +778,20 @@ function App() {
       }
     } else {
       if (!multiDates.length) {
-        alert('กรุณาเพิ่มวันที่ที่ต้องการจองอย่างน้อย 1 วัน')
-        return
+        if (!multiDateInput) {
+          alert('กรุณาเลือกวันที่ที่ต้องการจองอย่างน้อย 1 วัน')
+          return
+        }
+        const candidate = multiDateInput
+        const parsed = new Date(`${candidate}T00:00:00Z`)
+        if (Number.isNaN(parsed.getTime())) {
+          alert('วันที่ไม่ถูกต้อง')
+          return
+        }
+        bookingDates = [candidate]
+      } else {
+        bookingDates = [...new Set(multiDates)].sort()
       }
-      bookingDates = [...new Set(multiDates)].sort()
     }
 
     try {
@@ -893,7 +903,7 @@ function App() {
     !selectedDepartment ||
     (seatRequired && !selectedSeat) ||
     (bookingMode === 'range' && (!bookingStartDate || !bookingEndDate)) ||
-    (bookingMode === 'multi' && multiDates.length === 0)
+    (bookingMode === 'multi' && multiDates.length === 0 && !multiDateInput)
 
   return (
     <BrowserRouter>
