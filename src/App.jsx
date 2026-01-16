@@ -242,8 +242,138 @@ const NAV_LINKS = [
   { to: '/holidays', label: 'วันหยุดประจำปี' },
   { to: '/departments', label: 'จัดการฝ่ายงาน' },
   { to: '/employees', label: 'จัดการพนักงาน' },
+  { to: '/export', label: 'ส่งออกข้อมูล' },
   { to: '/reports', label: 'รายงาน / ประวัติ' },
 ]
+
+const EXPORT_SOURCES = [
+  {
+    id: 'booking-history',
+    label: 'ประวัติการจอง (Employee Booking History)',
+    table: 'employee_booking_history',
+    viewName: 'boksite.employee_booking_history',
+    dateField: 'booking_date',
+    officeField: 'office_name',
+    departmentField: 'department_name',
+    statusField: 'status',
+    columns: [
+      { key: 'booking_date', label: 'วันที่', formatter: formatDate, nowrap: true },
+      { key: 'employee_code', label: 'รหัสพนักงาน', nowrap: true },
+      { key: 'employee_name', label: 'ชื่อพนักงาน' },
+      { key: 'department_name', label: 'ฝ่ายงาน' },
+      { key: 'office_name', label: 'ออฟฟิศ' },
+      { key: 'status', label: 'สถานะ', nowrap: true },
+      { key: 'purpose_name', label: 'เหตุผล' },
+      { key: 'seat_code', label: 'ที่นั่ง', nowrap: true },
+    ],
+  },
+  {
+    id: 'daily-status',
+    label: 'สรุปการจองรายวัน (Booking Status Summary)',
+    table: 'booking_status_daily_summary',
+    viewName: 'boksite.booking_status_daily_summary',
+    dateField: 'booking_date',
+    statusField: 'status',
+    columns: [
+      { key: 'booking_date', label: 'วันที่', formatter: formatDate, nowrap: true },
+      { key: 'purpose_name', label: 'เหตุผล' },
+      { key: 'status', label: 'สถานะ', nowrap: true },
+      { key: 'total', label: 'จำนวน', nowrap: true },
+    ],
+  },
+  {
+    id: 'capacity',
+    label: 'ความจุต่อฝ่าย (Department Capacity)',
+    table: 'department_daily_capacity_usage',
+    viewName: 'boksite.department_daily_capacity_usage',
+    dateField: 'booking_date',
+    officeField: 'office_name',
+    departmentField: 'department_name',
+    columns: [
+      { key: 'booking_date', label: 'วันที่', formatter: formatDate, nowrap: true },
+      { key: 'department_name', label: 'ฝ่ายงาน' },
+      { key: 'office_name', label: 'ออฟฟิศ' },
+      { key: 'active_bookings', label: 'จองแล้ว', nowrap: true },
+      { key: 'seat_capacity', label: 'ความจุ', nowrap: true },
+      { key: 'remaining_capacity', label: 'คงเหลือ', nowrap: true },
+    ],
+  },
+  {
+    id: 'holidays',
+    label: 'วันหยุดบริษัท (Holiday Overview)',
+    table: 'office_holiday_overview',
+    viewName: 'boksite.office_holiday_overview',
+    dateField: 'holiday_date',
+    officeField: 'office_name',
+    columns: [
+      { key: 'holiday_date', label: 'วันที่', formatter: formatDate, nowrap: true },
+      { key: 'holiday_name', label: 'ชื่อวันหยุด' },
+      { key: 'office_name', label: 'ออฟฟิศ' },
+      { key: 'description', label: 'รายละเอียด' },
+    ],
+  },
+]
+
+const applyExportFilters = (rows, filters, source, officeLookup, departmentLookup) => {
+  let filtered = [...rows]
+  const startDate = filters.startDate
+  const endDate = filters.endDate
+  if (source?.dateField && (startDate || endDate)) {
+    const startKey = startDate || '0000-01-01'
+    const endKey = endDate || '9999-12-31'
+    filtered = filtered.filter((row) => {
+      const raw = row[source.dateField]
+      if (!raw) return false
+      const value = raw.slice(0, 10)
+      return value >= startKey && value <= endKey
+    })
+  }
+
+  if (filters.officeId && source?.officeField) {
+    const officeName = officeLookup.get(filters.officeId) ?? filters.officeId
+    filtered = filtered.filter((row) => row[source.officeField] === officeName)
+  }
+
+  if (filters.departmentId && source?.departmentField) {
+    const departmentName = departmentLookup.get(filters.departmentId) ?? filters.departmentId
+    filtered = filtered.filter((row) => row[source.departmentField] === departmentName)
+  }
+
+  if (filters.status && source?.statusField) {
+    filtered = filtered.filter((row) => row[source.statusField] === filters.status)
+  }
+
+  const keyword = filters.keyword?.trim().toLowerCase()
+  if (keyword) {
+    filtered = filtered.filter((row) =>
+      Object.values(row).some((value) => String(value ?? '').toLowerCase().includes(keyword))
+    )
+  }
+
+  return filtered
+}
+
+const formatCsvValue = (value) => {
+  const stringValue = String(value ?? '')
+  const escaped = stringValue.replace(/"/g, '""')
+  if (/[",\n]/.test(escaped)) {
+    return `"${escaped}"`
+  }
+  return escaped
+}
+
+const buildCsvContent = (rows, columns) => {
+  const header = columns.map((column) => formatCsvValue(column.label)).join(',')
+  const body = rows.map((row) =>
+    columns
+      .map((column) => {
+        const rawValue = column.formatter ? column.formatter(row[column.key]) : row[column.key] ?? ''
+        return formatCsvValue(rawValue)
+      })
+      .join(',')
+  )
+  return [header, ...body].join('\n')
+}
 
 function App() {
   const [offices, setOffices] = useState([])
@@ -277,6 +407,17 @@ function App() {
   const [historyReport, setHistoryReport] = useState({ loading: true, rows: [] })
   const [holidayReport, setHolidayReport] = useState({ loading: true, rows: [] })
 
+  const [exportSourceId, setExportSourceId] = useState(EXPORT_SOURCES[0]?.id ?? '')
+  const [exportFilters, setExportFilters] = useState({
+    startDate: TODAY,
+    endDate: TODAY,
+    officeId: '',
+    departmentId: '',
+    status: '',
+    keyword: '',
+  })
+  const [exportState, setExportState] = useState({ loading: false, rows: [], error: null })
+
   // Booking editor modal state
   const [editBookingState, setEditBookingState] = useState({ open: false, loading: false, id: null, form: null })
 
@@ -299,6 +440,12 @@ function App() {
   }, [])
 
   const supabaseConfigured = Boolean(supabase)
+  const exportSource = useMemo(() => EXPORT_SOURCES.find((source) => source.id === exportSourceId), [exportSourceId])
+  const officeLookup = useMemo(() => new Map(offices.map((office) => [office.id, office.name])), [offices])
+  const departmentLookup = useMemo(
+    () => new Map(departments.map((department) => [department.id, department.name])),
+    [departments],
+  )
 
   const fetchTable = useCallback(
     async (table, orderColumn = 'name') => {
@@ -363,6 +510,10 @@ function App() {
       ignore = true
     }
   }, [fetchTable])
+
+  useEffect(() => {
+    setExportState({ loading: false, rows: [], error: null })
+  }, [exportSourceId])
 
   const reloadCalendar = useCallback(async () => {
     setCalendarState({ loading: true, rows: [] })
@@ -484,6 +635,52 @@ function App() {
       setHistoryReport({ loading: false, rows: [] })
     }
   }, [fetchView])
+
+  const handleExportFilterChange = useCallback((patch) => {
+    setExportFilters((prev) => ({ ...prev, ...patch }))
+  }, [])
+
+  const resetExportFilters = useCallback(() => {
+    setExportFilters({
+      startDate: TODAY,
+      endDate: TODAY,
+      officeId: '',
+      departmentId: '',
+      status: '',
+      keyword: '',
+    })
+    setExportState({ loading: false, rows: [], error: null })
+  }, [])
+
+  const loadExportPreview = useCallback(async () => {
+    if (!exportSource) return
+    setExportState({ loading: true, rows: [], error: null })
+    try {
+      const rows = await fetchView(exportSource.table)
+      const filtered = applyExportFilters(rows, exportFilters, exportSource, officeLookup, departmentLookup)
+      setExportState({ loading: false, rows: filtered, error: null })
+    } catch (error) {
+      console.error('Export preview failed', error)
+      setExportState({ loading: false, rows: [], error: error?.message ?? 'ไม่สามารถโหลดข้อมูลได้' })
+    }
+  }, [departmentLookup, exportFilters, exportSource, fetchView, officeLookup])
+
+  const handleExportDownload = useCallback(() => {
+    if (!exportSource) return
+    if (!exportState.rows.length) {
+      alert('ไม่มีข้อมูลสำหรับส่งออก กรุณาปรับตัวกรองและลองใหม่')
+      return
+    }
+    const csvContent = buildCsvContent(exportState.rows, exportSource.columns)
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const timestamp = new Date().toISOString().slice(0, 10)
+    link.href = url
+    link.download = `${exportSource.id}-${timestamp}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [exportSource, exportState.rows])
 
   const openBookingEditor = useCallback(
     async (bookingId) => {
@@ -1012,6 +1209,25 @@ function App() {
                   employees={employees}
                   departments={departments}
                   reloadEmployees={reloadEmployees}
+                />
+              }
+            />
+            <Route
+              path="/export"
+              element={
+                <ExportPage
+                  sources={EXPORT_SOURCES}
+                  activeSource={exportSource}
+                  exportFilters={exportFilters}
+                  onFilterChange={handleExportFilterChange}
+                  onSourceChange={setExportSourceId}
+                  onPreview={loadExportPreview}
+                  onDownload={handleExportDownload}
+                  onReset={resetExportFilters}
+                  exportState={exportState}
+                  offices={offices}
+                  departments={departments}
+                  supabaseConfigured={supabaseConfigured}
                 />
               }
             />
@@ -2293,6 +2509,179 @@ function EmployeeMasterPage({ supabase, supabaseConfigured, employees, departmen
             </tbody>
           </table>
         </div>
+      </div>
+    </section>
+  )
+}
+
+function ExportPage({
+  sources,
+  activeSource,
+  exportFilters,
+  onFilterChange,
+  onSourceChange,
+  onPreview,
+  onDownload,
+  onReset,
+  exportState,
+  offices,
+  departments,
+  supabaseConfigured,
+}) {
+  const handleSubmit = useCallback(
+    (event) => {
+      event.preventDefault()
+      onPreview()
+    },
+    [onPreview],
+  )
+
+  return (
+    <section className="tab-panel active export-layout">
+      <div className="card export-controls">
+        <h2>ส่งออกข้อมูลจาก SQL Server</h2>
+        <p className="hint-text">
+          เลือกชุดข้อมูลที่ต้องการ พร้อมกำหนดตัวกรอง ก่อนดาวน์โหลดเป็นไฟล์ CSV เพื่อนำไปใช้งานต่อ
+        </p>
+        {!supabaseConfigured && (
+          <p className="hint-text">
+            ขณะนี้เป็นข้อมูลตัวอย่าง (offline mode) หากต้องการดึงข้อมูลจริงจาก SQL Server ให้ตั้งค่าการเชื่อมต่อ Supabase
+          </p>
+        )}
+        <form className="export-form" onSubmit={handleSubmit}>
+          <label>
+            ชุดข้อมูลที่ต้องการ
+            <select
+              value={activeSource?.id ?? ''}
+              onChange={(event) => onSourceChange(event.target.value)}
+            >
+              {sources.map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="date-range">
+            <label>
+              วันที่เริ่มต้น
+              <input
+                type="date"
+                lang="en-GB"
+                value={exportFilters.startDate}
+                onChange={(event) => onFilterChange({ startDate: event.target.value })}
+              />
+            </label>
+            <span className="range-sep">ถึง</span>
+            <label>
+              วันที่สิ้นสุด
+              <input
+                type="date"
+                lang="en-GB"
+                value={exportFilters.endDate}
+                onChange={(event) => onFilterChange({ endDate: event.target.value })}
+              />
+            </label>
+          </div>
+
+          <div className="filter-grid">
+            <label>
+              ออฟฟิศ
+              <select
+                value={exportFilters.officeId}
+                onChange={(event) => onFilterChange({ officeId: event.target.value })}
+                disabled={!activeSource?.officeField}
+              >
+                <option value="">ทั้งหมด</option>
+                {offices.map((office) => (
+                  <option key={office.id} value={office.id}>
+                    {office.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              ฝ่ายงาน
+              <select
+                value={exportFilters.departmentId}
+                onChange={(event) => onFilterChange({ departmentId: event.target.value })}
+                disabled={!activeSource?.departmentField}
+              >
+                <option value="">ทั้งหมด</option>
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              สถานะ
+              <select
+                value={exportFilters.status}
+                onChange={(event) => onFilterChange({ status: event.target.value })}
+                disabled={!activeSource?.statusField}
+              >
+                <option value="">ทั้งหมด</option>
+                <option value="BOOKED">BOOKED</option>
+                <option value="CANCELLED">CANCELLED</option>
+              </select>
+            </label>
+            <label>
+              ค้นหาคำสำคัญ
+              <input
+                type="text"
+                placeholder="เช่น รหัสพนักงาน หรือ ชื่อออฟฟิศ"
+                value={exportFilters.keyword}
+                onChange={(event) => onFilterChange({ keyword: event.target.value })}
+              />
+            </label>
+          </div>
+
+          <div className="card-actions">
+            <button type="submit" className="btn primary">
+              ดูตัวอย่าง
+            </button>
+            <button type="button" className="btn secondary" onClick={onReset}>
+              ล้างตัวกรอง
+            </button>
+            <button
+              type="button"
+              className="btn tertiary"
+              onClick={onDownload}
+              disabled={!exportState.rows.length}
+            >
+              ดาวน์โหลด CSV
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div className="report-card export-preview">
+        <header>
+          <div className="report-card-heading">
+            <h3>ตัวอย่างข้อมูลก่อนส่งออก</h3>
+            {activeSource?.viewName && <span className="report-source">SELECT * FROM {activeSource.viewName}</span>}
+          </div>
+          <div className="card-actions">
+            <span className="hint-text">
+              จำนวนรายการ: {exportState.rows.length.toLocaleString('th-TH')}
+            </span>
+          </div>
+        </header>
+        <DataRegion
+          state={exportState}
+          allowEmpty
+        >
+          {exportState.error ? (
+            <EmptyState message={exportState.error} />
+          ) : exportState.rows.length ? (
+            <ReportTable rows={exportState.rows} columns={activeSource?.columns ?? []} />
+          ) : (
+            <EmptyState message="ยังไม่มีข้อมูลตัวอย่าง กรุณากดดูตัวอย่างเพื่อแสดงผลลัพธ์" />
+          )}
+        </DataRegion>
       </div>
     </section>
   )
