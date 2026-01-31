@@ -1880,6 +1880,7 @@ function DepartmentMasterPage({ supabase, supabaseConfigured, departments, offic
   }
 
   const handleEdit = (department) => {
+    console.log('Editing department', department)
     setEditingId(department.id)
     setForm({
       office_id: department.office_id ?? '',
