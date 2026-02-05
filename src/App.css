@@ -791,6 +791,32 @@ thead th {
   gap: 1.5rem;
 }
 
+.export-layout {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.export-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.export-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.filter-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.export-preview .hint-text {
+  font-weight: 600;
+}
+
 .report-menu {
   display: flex;
   flex-direction: column;
